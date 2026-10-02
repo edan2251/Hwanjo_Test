@@ -20,6 +20,25 @@ namespace FourGuardians.CourseContent.Combat
 
         public event Action<int, int> HealthChanged;
         public event Action Died;
+        // Raised only for accepted damage, after IsDead is updated.
+        public event Action<DamageInfo> DamageTaken;
+        public bool DamageEnabled { get; set; } = true;
+        public bool IsInvincible => invincibleTimer > 0f;
+
+        public void ConfigureInvulnerability(float duration)
+        {
+            invincibleDuration = Mathf.Max(0f, duration);
+        }
+
+        public void ResetHealth()
+        {
+            CurrentHealth = maxHealth;
+            IsDead = false;
+            invincibleTimer = 0f;
+            DamageEnabled = true;
+            if (visual != null) visual.color = originalColor;
+            HealthChanged?.Invoke(CurrentHealth, maxHealth);
+        }
 
         public CombatTeam Team => team;
         public bool IsDead { get; private set; }
@@ -60,7 +79,7 @@ namespace FourGuardians.CourseContent.Combat
 
         public void TakeDamage(DamageInfo damageInfo)
         {
-            if (IsDead || invincibleTimer > 0f || damageInfo.Amount <= 0)
+            if (!DamageEnabled || IsDead || invincibleTimer > 0f || damageInfo.Amount <= 0)
             {
                 return;
             }
@@ -74,13 +93,10 @@ namespace FourGuardians.CourseContent.Combat
                 body.linearVelocity += damageInfo.Knockback;
             }
 
+            IsDead = CurrentHealth == 0;
             HealthChanged?.Invoke(CurrentHealth, maxHealth);
-
-            if (CurrentHealth == 0)
-            {
-                IsDead = true;
-                Died?.Invoke();
-            }
+            DamageTaken?.Invoke(damageInfo);
+            if (IsDead) Died?.Invoke();
         }
     }
 }

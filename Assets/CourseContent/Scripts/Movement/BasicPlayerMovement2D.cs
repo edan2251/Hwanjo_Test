@@ -54,6 +54,121 @@ namespace FourGuardians.CourseContent.Movement
         private float wallJumpInputLock;
         private Collider2D currentLadder;
 
+        // These hooks are opt-in: existing course scenes retain their original controls.
+        private bool bossCombatMode;
+        private bool gameplayEnabled = true;
+        private bool externalInput;
+        private float externalVertical;
+        private float queuedHorizontal;
+        private float queuedVertical;
+        private bool externalJump;
+        private bool externalAttack;
+        private bool externalDash;
+        private float dashCooldownTimer;
+        private float hitStunTimer;
+        public float DashCooldown { get; set; } = 0.4f;
+        public float MoveSpeed => moveSpeed;
+        public float JumpSpeed => jumpSpeed;
+        public float DashSpeed => dashSpeed;
+        public float DashDuration => 0.28f;
+        public bool UsesExternalInput => externalInput;
+        public uint AttackSequence { get; private set; }
+
+        public void ConfigureBossCombat()
+        {
+            bossCombatMode = true;
+            queuedHorizontal = queuedVertical = 0f;
+            externalJump = externalAttack = externalDash = false;
+        }
+
+        public void SetGameplayEnabled(bool value)
+        {
+            gameplayEnabled = value;
+            queuedHorizontal = queuedVertical = 0f;
+            if (value) return;
+            horizontal = 0f;
+            externalVertical = 0f;
+            jumpRequested = externalJump = externalAttack = externalDash = false;
+            actionTimer = hitStunTimer = 0f;
+            if (Action != WarriorAction.Death) Action = WarriorAction.Idle;
+            if (body != null) body.linearVelocity = Vector2.zero;
+        }
+
+        public void SetExternalInput(bool value)
+        {
+            externalInput = value;
+            horizontal = externalVertical = queuedHorizontal = queuedVertical = 0f;
+            externalJump = externalAttack = externalDash = false;
+        }
+
+        public void SubmitInput(float move, bool jump, bool attack, bool dash, float vertical = 0f)
+        {
+            if (!externalInput || !gameplayEnabled || Action == WarriorAction.Death || (bossCombatMode && Time.timeScale <= 0f)) return;
+            queuedHorizontal = Mathf.Clamp(move, -1f, 1f);
+            queuedVertical = Mathf.Clamp(vertical, -1f, 1f);
+            externalJump |= jump;
+            externalAttack |= attack;
+            externalDash |= dash;
+        }
+
+        public void ReceiveHit(float duration = 0.22f)
+        {
+            if (Action == WarriorAction.Death) return;
+            ExitLadder();
+            jumpRequested = false;
+            Action = WarriorAction.Hurt;
+            actionTimer = hitStunTimer = Mathf.Max(0f, duration);
+        }
+
+        public void SetDead()
+        {
+            SetGameplayEnabled(false);
+            Action = WarriorAction.Death;
+            if (body != null) body.linearVelocity = Vector2.zero;
+        }
+
+        public void ResetState(Vector2 position, int initialFacing = 1)
+        {
+            if (body == null) body = GetComponent<Rigidbody2D>();
+            if (bodyCollider == null) bodyCollider = GetComponent<CapsuleCollider2D>();
+            body.position = position;
+            transform.position = new Vector3(position.x, position.y, transform.position.z);
+            body.linearVelocity = Vector2.zero;
+            body.angularVelocity = 0f;
+            body.gravityScale = 3f;
+            body.WakeUp();
+            facing = initialFacing >= 0 ? 1 : -1;
+            horizontal = externalVertical = queuedHorizontal = queuedVertical = actionTimer = hitStunTimer = dashCooldownTimer = 0f;
+            ladderReentryCooldown = wallJumpInputLock = 0f;
+            jumpRequested = externalJump = externalAttack = externalDash = false;
+            nearLadder = isClimbing = atLadderTop = ladderJumpRequested = false;
+            currentLadder = null;
+            VerticalInput = 0f;
+            IsGrounded = false;
+            Action = WarriorAction.Idle;
+            gameplayEnabled = true;
+        }
+
+        private void ConsumeExternalInput()
+        {
+            // Apply queued axes and buttons together in Update, like keyboard input.
+            horizontal = queuedHorizontal;
+            externalVertical = queuedVertical;
+            bool locked = Action is WarriorAction.Dash or WarriorAction.DashAttack;
+            if (!locked && wallJumpInputLock <= 0f && Mathf.Abs(horizontal) > 0.01f)
+                facing = horizontal > 0f ? 1 : -1;
+            if (externalJump) jumpRequested = true;
+            if (externalAttack) RequestAttack();
+            if (externalDash) RequestDash();
+            externalJump = externalAttack = externalDash = false;
+        }
+        private void RequestDash()
+        {
+            if (bossCombatMode && (dashCooldownTimer > 0f || Action == WarriorAction.Hurt)) return;
+            Begin(WarriorAction.Dash, DashDuration);
+            if (bossCombatMode) dashCooldownTimer = Mathf.Max(DashDuration, DashCooldown);
+        }
+
         public WarriorAction Action { get; private set; } = WarriorAction.Idle;
         public Vector2 Velocity => body == null ? Vector2.zero : body.linearVelocity;
         public int Facing => facing;
@@ -79,8 +194,21 @@ namespace FourGuardians.CourseContent.Movement
         // Update에서는 키 입력을 읽는다. wasPressedThisFrame 입력을 놓치지 않기 위해서다.
         private void Update()
         {
+            // Discard paused button requests; resuming must not execute buffered actions.
+            if (bossCombatMode && Time.timeScale <= 0f)
+            {
+                jumpRequested = ladderJumpRequested = externalJump = externalAttack = externalDash = false;
+                horizontal = externalVertical = queuedHorizontal = queuedVertical = 0f;
+                return;
+            }
             Keyboard keyboard = Keyboard.current;
-            if (keyboard == null || Action == WarriorAction.Death) return;
+            if (!gameplayEnabled || Action == WarriorAction.Death) return;
+            if (externalInput)
+            {
+                ConsumeExternalInput();
+                return;
+            }
+            if (keyboard == null) { horizontal = 0f; return; }
 
             horizontal = Axis(keyboard.aKey.isPressed || keyboard.leftArrowKey.isPressed,
                 keyboard.dKey.isPressed || keyboard.rightArrowKey.isPressed);
@@ -106,10 +234,10 @@ namespace FourGuardians.CourseContent.Movement
             if (keyboard.leftShiftKey.wasPressedThisFrame || keyboard.kKey.wasPressedThisFrame)
             {
                 // 짧은 시간에 빠르게 이동해야 대시가 걷기와 확실히 구분된다.
-                Begin(WarriorAction.Dash, 0.28f);
+                RequestDash();
             }
-            if (keyboard.hKey.wasPressedThisFrame) Begin(WarriorAction.Hurt, 0.2f);
-            if (keyboard.lKey.wasPressedThisFrame)
+            if (!bossCombatMode && keyboard.hKey.wasPressedThisFrame) Begin(WarriorAction.Hurt, 0.2f);
+            if (!bossCombatMode && keyboard.lKey.wasPressedThisFrame)
             {
                 Action = WarriorAction.Death;
                 body.linearVelocity = Vector2.zero;
@@ -119,6 +247,19 @@ namespace FourGuardians.CourseContent.Movement
         // FixedUpdate에서는 Rigidbody2D를 움직인다. 물리 계산은 일정한 시간 간격으로 해야 안정적이다.
         private void FixedUpdate()
         {
+            dashCooldownTimer = Mathf.Max(0f, dashCooldownTimer - Time.fixedDeltaTime);
+            if (!gameplayEnabled)
+            {
+                if (body != null) body.linearVelocity = new Vector2(0f, body.linearVelocity.y);
+                return;
+            }
+            if (bossCombatMode && hitStunTimer > 0f)
+            {
+                hitStunTimer = Mathf.Max(0f, hitStunTimer - Time.fixedDeltaTime);
+                jumpRequested = false;
+                if (hitStunTimer <= 0f) Action = WarriorAction.Fall;
+                return;
+            }
             ladderReentryCooldown = Mathf.Max(0f, ladderReentryCooldown - Time.fixedDeltaTime);
             wallJumpInputLock = Mathf.Max(0f, wallJumpInputLock - Time.fixedDeltaTime);
             UpdateGrounded();
@@ -182,7 +323,7 @@ namespace FourGuardians.CourseContent.Movement
         private void SelectFreeAction()
         {
             Keyboard keyboard = Keyboard.current;
-            bool down = keyboard != null && (keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed);
+            bool down = externalInput ? externalVertical < -0.01f : keyboard != null && (keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed);
             if (IsGrounded)
             {
                 if (down && Mathf.Abs(horizontal) > 0.01f) Begin(WarriorAction.Slide, 0.5f);
@@ -228,6 +369,8 @@ namespace FourGuardians.CourseContent.Movement
         {
             if (Action is WarriorAction.Death or WarriorAction.Hurt) return;
             Action = nextAction;
+            if (nextAction is WarriorAction.BasicAttack or WarriorAction.Attack1 or WarriorAction.Attack2
+                or WarriorAction.DashAttack or WarriorAction.JumpAttack) AttackSequence++;
             actionTimer = duration;
         }
 
@@ -348,6 +491,7 @@ namespace FourGuardians.CourseContent.Movement
 
         private float ReadVertical()
         {
+            if (externalInput) return externalVertical;
             Keyboard keyboard = Keyboard.current;
             return keyboard == null ? 0f : Axis(keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed,
                 keyboard.wKey.isPressed || keyboard.upArrowKey.isPressed);

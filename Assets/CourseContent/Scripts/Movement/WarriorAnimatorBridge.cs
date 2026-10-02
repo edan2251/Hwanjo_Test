@@ -11,6 +11,7 @@ namespace FourGuardians.CourseContent.Movement
         private Animator animator;
         private SpriteRenderer spriteRenderer;
         private string currentStateName;
+        private uint lastAttackSequence;
 
         public void Configure(BasicPlayerMovement2D controller)
         {
@@ -35,9 +36,13 @@ namespace FourGuardians.CourseContent.Movement
             UpdateVisualPosition();
             UpdateAnimationSpeed();
             string nextStateName = GetStateName(movement.Action);
+            // Consecutive attacks can share the same clip without an observed Idle frame.
+            bool restartAttack = movement.AttackSequence != lastAttackSequence
+                && (nextStateName == "Dash-Attack" || nextStateName == "Attack");
+            lastAttackSequence = movement.AttackSequence;
 
             // 같은 상태를 매 프레임 Play하면 애니메이션이 첫 프레임에서 멈추므로 변경될 때만 재생한다.
-            if (nextStateName == currentStateName)
+            if (nextStateName == currentStateName && !restartAttack)
             {
                 return;
             }

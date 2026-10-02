@@ -16,6 +16,16 @@ namespace FourGuardians.CourseContent.Combat
         private WarriorAction previousAction;
         private float attackElapsed;
         private bool hitboxActive;
+        private uint previousAttackSequence;
+        public bool IsHitboxActive => hitboxActive;
+
+        public void ResetCombat()
+        {
+            StopHitbox();
+            attackElapsed = 0f;
+            previousAction = WarriorAction.Idle;
+            previousAttackSequence = movement == null ? 0 : movement.AttackSequence;
+        }
 
         public void Configure(BasicPlayerMovement2D newMovement, DamageHitbox2D newHitbox)
         {
@@ -25,6 +35,7 @@ namespace FourGuardians.CourseContent.Combat
 
         private void Update()
         {
+            if (Time.timeScale <= 0f) return;
             if (movement == null || attackHitbox == null)
             {
                 return;
@@ -44,12 +55,13 @@ namespace FourGuardians.CourseContent.Combat
                 return;
             }
 
-            if (action != previousAction)
+            if (action != previousAction || previousAttackSequence != movement.AttackSequence)
             {
                 attackElapsed = 0f;
                 StopHitbox();
             }
 
+            previousAttackSequence = movement.AttackSequence;
             attackElapsed += Time.deltaTime;
             previousAction = action;
             attackHitbox.transform.localPosition = new Vector3(movement.Facing * attackOffset, 0.7f, 0f);
