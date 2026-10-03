@@ -113,7 +113,7 @@ namespace FourGuardians.BossFight
         public void SetBurrow(string stage, Vector2 position, float progress)
         {
             if (!configured) return;
-            stage = stage ?? "none";
+            stage = (stage ?? "none").ToLowerInvariant();
             bool changed = burrowStage != stage;
             burrowStage = stage;
             burrowProgress = Mathf.Clamp01(progress);
@@ -121,8 +121,10 @@ namespace FourGuardians.BossFight
             burrowPosition = new Vector2(position.x, FloorY + 0.04f);
             if (!changed) return;
             emissionTimer = 0f;
-            if (stage == "erupt")
-                for (int i = 0; i < 13; i++) EmitDebris(burrowPosition, false, false, 1.1f);
+            if (stage == "rise")
+                for (int i = 0; i < 9; i++) EmitDebris(burrowPosition, false, false, 0.85f);
+            else if (stage == "land")
+                for (int i = 0; i < 8; i++) EmitDebris(burrowPosition + Vector2.right * Range(-1.0f, 1.0f), false, true, 0.38f);
             else if (stage == "submerge")
                 for (int i = 0; i < 7; i++) EmitDebris(burrowPosition, false, false, 0.5f);
         }
@@ -298,11 +300,11 @@ namespace FourGuardians.BossFight
                 emissionTimer = 0.09f;
                 EmitDebris(new Vector2(bossPosition.x + Range(-2.5f, 2.5f), FloorY + 0.2f), true, false, 0.6f);
             }
-            else if ((burrowStage == "travel" || burrowStage == "lock") && emissionTimer <= 0f)
+            else if ((burrowStage == "travel" || burrowStage == "submerge") && emissionTimer <= 0f)
             {
                 emissionTimer = burrowStage == "travel" ? 0.065f : 0.09f;
                 Vector2 point = burrowPosition + Vector2.right * Range(-0.42f, 0.42f);
-                EmitDebris(point, false, true, burrowStage == "lock" ? 0.25f + burrowProgress * 0.16f : 0.25f);
+                EmitDebris(point, false, true, burrowStage == "submerge" ? 0.20f + burrowProgress * 0.10f : 0.25f);
             }
             for (int i = pieces.Count - 1; i >= 0; i--)
             {

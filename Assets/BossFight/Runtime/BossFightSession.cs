@@ -35,6 +35,7 @@ namespace FourGuardians.BossFight
         public float StateTime => stateTime;
         public int Attempts => attempts;
         public bool Muted => feedback != null && feedback.Muted;
+        public float CameraShake => feedback != null ? feedback.ShakeScale : 0f;
         public string LastCue => lastCue;
         public float CueAge => Time.unscaledTime - cueTime;
         public bool IsQaContracts { get; private set; }
@@ -61,8 +62,8 @@ namespace FourGuardians.BossFight
             {
                 if (args[i] == "-bossqa" && i + 1 < args.Length)
                 {
-                    IsQaContracts = args[i + 1] == "contracts";
-                    qaIntro = args[i + 1] == "intro";
+                    IsQaContracts = args[i + 1] == "contracts" || args[i + 1] == "v3contracts";
+                    qaIntro = args[i + 1] == "intro" || args[i + 1] == "v3intro" || args[i + 1] == "observe";
                 }
                 if (args[i] == "-bossqa-fps" && i + 1 < args.Length && int.TryParse(args[i + 1], out int fps))
                     Application.targetFrameRate = Mathf.Clamp(fps, 15, 240);
@@ -152,6 +153,7 @@ namespace FourGuardians.BossFight
             if (keyboard != null)
             {
                 if (keyboard.mKey.wasPressedThisFrame) ToggleMute();
+                if (keyboard.f6Key.wasPressedThisFrame) CycleCameraShake();
                 if (keyboard.f11Key.wasPressedThisFrame)
                     Screen.fullScreenMode = Screen.fullScreen ? FullScreenMode.Windowed : FullScreenMode.FullScreenWindow;
                 if (keyboard.escapeKey.wasPressedThisFrame) TogglePause();
@@ -159,6 +161,8 @@ namespace FourGuardians.BossFight
                 if (keyboard.rKey.wasPressedThisFrame && State != EncounterState.Introduction) Retry();
             }
             if (State == EncounterState.Introduction) UpdateIntroduction(Time.deltaTime);
+            feedback?.SetHazardReadability(State == EncounterState.Fighting && boss.RockfallActive);
+            feedback?.SetIntroFeedback(State == EncounterState.Introduction ? IntroStage : "", IntroStageProgress);
             if (State == EncounterState.Fighting)
             {
                 elapsed += Time.deltaTime;
@@ -182,6 +186,7 @@ namespace FourGuardians.BossFight
             {
                 bossVisual.SetCombatState(boss.Phase, boss.ArmorMask, boss.AttackStage, boss.AttackStageProgress,
                     boss.TransitionProgress, boss.IsUnderground, boss.TargetLocked);
+                bossVisual.SetAttackGeometry(boss.WarningBounds, boss.ActiveBounds, boss.FloorY);
                 if (State == EncounterState.Victory) bossVisual.SetDead(Mathf.Clamp01(stateTime / 1.8f));
                 else
                 {
@@ -194,7 +199,7 @@ namespace FourGuardians.BossFight
                 bossFlash = Mathf.MoveTowards(bossFlash, 0f, Time.unscaledDeltaTime * 9f);
                 bossVisual.SetFlash(bossFlash);
             }
-            if (State == EncounterState.Fighting && boss.Pattern == BossPattern.DT06Burrow)
+            if (State == EncounterState.Fighting && boss.Pattern == BossPattern.BBurrowLeap)
                 arenaEffects?.SetBurrow(boss.AttackStage, boss.transform.position, boss.AttackStageProgress);
             else arenaEffects?.SetBurrow("none", boss.transform.position, 0f);
             if (State == EncounterState.Fighting && player.transform.position.y < -4f && !player.Health.IsInvincible)
@@ -211,6 +216,8 @@ namespace FourGuardians.BossFight
                 BossPattern.DT04Inhale => "DT04",
                 BossPattern.DT05BodySlam => "DT05",
                 BossPattern.DT06Burrow => "DT06",
+                BossPattern.ARockfall => "ARockfall",
+                BossPattern.BBurrowLeap => "BBurrowLeap",
                 _ => "MV01"
             };
         }
@@ -230,6 +237,7 @@ namespace FourGuardians.BossFight
         {
             bossVisual?.OnLocalHit(point, region, hasArmor);
             feedback?.BossHit(point, hasArmor);
+            HitStop(hasArmor ? .018f : .025f);
         }
         private void OnPlayerDamaged(DamageInfo damage)
         {
@@ -239,7 +247,6 @@ namespace FourGuardians.BossFight
         private void OnBossDamaged(DamageInfo damage)
         {
             bossFlash = .45f;
-            HitStop(boss.ArmorCount > 0 ? .018f : .025f);
         }
         private void HitStop(float duration)
         {
@@ -289,6 +296,12 @@ namespace FourGuardians.BossFight
             }
         }
         public void ToggleMute() { if (feedback != null) feedback.Muted = !feedback.Muted; }
+        public void CycleCameraShake()
+        {
+            if (feedback == null) return;
+            float value = feedback.ShakeScale;
+            feedback.ShakeScale = value < .01f ? .35f : value < .5f ? .65f : value < .9f ? 1f : 0f;
+        }
         public void Retry()
         {
             if (!ready) return;

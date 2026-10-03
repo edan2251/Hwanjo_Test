@@ -23,6 +23,10 @@ namespace FourGuardians.BossFight
         private float shakeRemaining;
         private float shakeDuration;
         private float shakeStrength;
+        private float introShakeStrength;
+        private bool hazardReadability;
+        // A restrained default keeps floor tells readable; Retry preserves the chosen setting.
+        private static float sessionShakeScale = 0.65f;
         // Retry reloads the scene, but must preserve the user's in-session audio choice.
         private static bool sessionMuted;
         private bool muted;
@@ -51,6 +55,38 @@ namespace FourGuardians.BossFight
                 if (effects != null) effects.mute = value;
                 if (atmosphere != null) atmosphere.mute = value;
             }
+        }
+
+        public float ShakeScale
+        {
+            get => sessionShakeScale;
+            set
+            {
+                sessionShakeScale = float.IsNaN(value) ? 0.65f : Mathf.Clamp01(value);
+                if (sessionShakeScale <= 0f && fightCamera != null)
+                    fightCamera.transform.position = CameraRest;
+            }
+        }
+
+        public void SetHazardReadability(bool active)
+        {
+            hazardReadability = active;
+            if (!active) return;
+            // Also shorten an impact already running when the first falling-rock tell appears.
+            shakeStrength = Mathf.Min(shakeStrength, 0.05f);
+            shakeRemaining = Mathf.Min(shakeRemaining, 0.10f);
+        }
+
+        // Called with normalized stage progress. Audio remains an entry cue, never a frame cue.
+        public void SetIntroFeedback(string stage, float progress)
+        {
+            progress = Mathf.Clamp01(progress);
+            if (stage == "inhale" || stage == "intro_inhale")
+                introShakeStrength = Mathf.Lerp(0.003f, 0.026f, progress * progress);
+            else if (stage == "emerge" || stage == "intro_emerge")
+                introShakeStrength = Mathf.Sin(progress * Mathf.PI) * 0.012f;
+            else
+                introShakeStrength = 0f;
         }
 
         public void Configure(Camera camera)
@@ -123,10 +159,36 @@ namespace FourGuardians.BossFight
                     Shake(0.045f, 0.45f);
                     break;
                 case "intro_inhale": Play("inhale", position, 0.63f); break;
-                case "intro_silence": effects.Stop(); atmosphere.Pause(); break;
+                case "intro_silence":
+                    effects.Stop();
+                    atmosphere.Pause();
+                    introShakeStrength = shakeRemaining = shakeStrength = 0f;
+                    break;
                 case "intro_roar":
                     Play("roar", position, 0.78f);
-                    Shake(0.075f, 0.38f);
+                    Shake(0.15f, 0.20f);
+                    break;
+                case "breathe":
+                case "groundbreathe":
+                    Play("inhale", position, 0.42f);
+                    Play("wood", position, 0.26f);
+                    break;
+                case "roar":
+                    Play("roar", position, 0.78f);
+                    Shake(0.15f, 0.20f);
+                    break;
+                case "flight": Play("sweep", position, 0.58f); break;
+                case "wave_delay": Play("lock", position, 0.42f); break;
+                case "wave":
+                    Play("impact", position, 0.60f);
+                    Play("sweep", position, 0.46f);
+                    Shake(0.06f * amount, 0.12f);
+                    break;
+                case "rockfall_warning": Play("lock", position, 0.34f); break;
+                case "link": Play("wood", position, 0.30f); break;
+                case "rockfall_impact":
+                    Play("impact", position, 0.48f);
+                    Shake(0.028f, 0.085f);
                     break;
                 case "armor_break": ArmorBreak(position, Mathf.RoundToInt(strength)); break;
                 case "compress": Play("wood", position, 0.55f); Play("rumble", position, 0.27f); break;
@@ -136,14 +198,14 @@ namespace FourGuardians.BossFight
                 case "travel": Play("travel", position, 0.48f); break;
                 case "erupt":
                     Play("impact", position, 0.80f);
-                    Shake(0.13f, 0.23f);
+                    Shake(0.13f, 0.18f);
                     Burst(position, 12, new Color(0.48f, 0.42f, 0.29f), 0.85f);
                     break;
                 case "slash": Play("sweep", position, 0.24f); break;
                 case "telegraph": Play("warning", position, 0.56f); break;
                 case "rise":
                     Play("rumble", position, 0.65f);
-                    Shake(0.045f * amount, 0.36f);
+                    Shake(0.04f * amount, 0.16f);
                     Burst(position, 7, new Color(0.40f, 0.34f, 0.22f), 0.6f);
                     break;
                 case "release": Play("rumble", position, 0.7f); break;
@@ -154,7 +216,7 @@ namespace FourGuardians.BossFight
                     break;
                 case "land":
                     Play("impact", position, 0.92f);
-                    Shake(0.16f * amount, 0.27f);
+                    Shake(0.16f * amount, 0.18f);
                     Burst(position, 14, new Color(0.55f, 0.49f, 0.34f), amount);
                     break;
                 case "sweep":
@@ -204,7 +266,7 @@ namespace FourGuardians.BossFight
         {
             if (!configured) return;
             Play("armor", position, 0.80f);
-            Shake(Mathf.Lerp(0.09f, 0.12f, Mathf.Clamp01(brokenCount / 4f)), 0.20f);
+            Shake(Mathf.Lerp(0.11f, 0.15f, Mathf.Clamp01(brokenCount / 4f)), 0.16f);
             Burst(position, 12, new Color(0.52f, 0.34f, 0.18f), 0.85f);
         }
 
@@ -217,7 +279,8 @@ namespace FourGuardians.BossFight
 
         public void ResetEffects()
         {
-            shakeRemaining = shakeStrength = 0f;
+            shakeRemaining = shakeDuration = shakeStrength = introShakeStrength = 0f;
+            hazardReadability = false;
             if (fightCamera != null) fightCamera.transform.position = CameraRest;
             for (int i = debris.Count - 1; i >= 0; i--)
                 if (debris[i].Transform != null) Destroy(debris[i].Transform.gameObject);
@@ -239,19 +302,26 @@ namespace FourGuardians.BossFight
 
         private void Shake(float strength, float duration)
         {
-            shakeStrength = Mathf.Max(shakeStrength, Mathf.Min(0.18f, strength));
+            float remainingEnvelope = shakeDuration > 0f ? shakeRemaining / shakeDuration : 0f;
+            float currentStrength = shakeStrength * remainingEnvelope * remainingEnvelope;
+            float limit = hazardReadability ? 0.05f : 0.18f;
+            // Compare against the decayed impulse so repeated small hits cannot revive a heavy one.
+            shakeStrength = Mathf.Max(currentStrength, Mathf.Min(limit, strength));
             shakeRemaining = Mathf.Max(shakeRemaining, duration);
+            if (hazardReadability) shakeRemaining = Mathf.Min(shakeRemaining, 0.10f);
             shakeDuration = shakeRemaining;
         }
 
         private void LateUpdate()
         {
             if (fightCamera == null) return;
-            shakeRemaining = Mathf.Max(0f, shakeRemaining - Time.unscaledDeltaTime);
+            shakeRemaining = Mathf.Max(0f, shakeRemaining - Time.unscaledDeltaTime * (hazardReadability ? 1.4f : 1f));
             float envelope = shakeDuration > 0f ? shakeRemaining / shakeDuration : 0f;
             float phase = Time.unscaledTime;
             Vector2 offset = new Vector2(Mathf.Sin(phase * 71f), Mathf.Sin(phase * 93f + 1f));
-            offset = Vector2.ClampMagnitude(offset * shakeStrength * envelope, 0.18f);
+            float strength = shakeStrength * envelope * envelope + introShakeStrength;
+            float limit = hazardReadability ? 0.05f : 0.18f;
+            offset = Vector2.ClampMagnitude(offset * strength, limit) * ShakeScale;
             fightCamera.transform.position = CameraRest + new Vector3(offset.x, offset.y, 0f);
             if (shakeRemaining <= 0f) shakeStrength = 0f;
         }
@@ -418,7 +488,8 @@ namespace FourGuardians.BossFight
         {
             if (effects != null) effects.Stop();
             if (atmosphere != null) atmosphere.Stop();
-            shakeRemaining = shakeStrength = 0f;
+            shakeRemaining = shakeDuration = shakeStrength = introShakeStrength = 0f;
+            hazardReadability = false;
             if (fightCamera != null) fightCamera.transform.position = CameraRest;
         }
 

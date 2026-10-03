@@ -60,6 +60,7 @@ namespace FourGuardians.BossFight
             }
             GUI.Label(new Rect(1010,22,230,23),$"\uc2dc\ub3c4 {session.Attempts:00}  \u00b7  {Mathf.FloorToInt(session.Elapsed/60):00}:{Mathf.FloorToInt(session.Elapsed%60):00}",small);
             GUI.Label(new Rect(1010,47,230,23),session.Muted?"M \uc18c\ub9ac \uaebc\uc9d0   F11 \ud654\uba74":"M \uc18c\ub9ac \ucf1c\uc9d0   F11 \ud654\uba74",small);
+            GUI.Label(new Rect(1010,72,230,23),$"F6 화면 진동 {Mathf.RoundToInt(session.CameraShake*100f)}%",small);
             var boss=session.Boss;
             if(boss!=null&&boss.Health!=null)
             {
@@ -88,29 +89,39 @@ namespace FourGuardians.BossFight
         {
             var boss=session.Boss;
             if(boss==null)return;
-            if(boss.State==BossState.Telegraph)
+            if(boss.RockfallActive)
+                GUI.Label(new Rect(365,120,550,26),"낙석 중  ·  위와 바닥의 그림자를 함께 보세요",smallCenter);
+            string text="";
+            Color accent=new Color(.95f,.65f,.29f);
+            if(boss.State==BossState.Link)
+                text="동작이 이어진다  ·  다음 자세를 보세요";
+            else if(boss.State==BossState.Telegraph || boss.State==BossState.Active)
             {
-                string text=boss.Pattern switch {
-                    BossPattern.DT01Slam => boss.Phase==1?"\uc55e\ubc1c \uac15\ud0c0  \u00b7  \ud45c\uc2dd \ubc16\uc73c\ub85c":"\uc804\uc9c4 \uac15\ud0c0  \u00b7  \ub3c4\ucc29 \ubc94\uc704 \ubc16\uc73c\ub85c",
-                    BossPattern.DT02Sweep => "\ub0ae\uc740 \ubfcc\ub9ac \ud30c\ub3d9  \u00b7  \ub2e4\uac00\uc62c \ub54c \uc810\ud504",
-                    BossPattern.DT03Bite => boss.Phase==1?"\uac70\ub300\ud55c \ubb3c\uae30  \u00b7  \uc785\uc5d0\uc11c \uac70\ub9ac \ubc8c\ub9ac\uae30":"\ub3c4\uc57d \ubb3c\uae30  \u00b7  \ub3c4\ucc29 \ubc94\uc704 \ubc16\uc73c\ub85c",
-                    BossPattern.DT05BodySlam => boss.TargetLocked?"\ucc29\uc9c0 \uc704\uce58 \uace0\uc815  \u00b7  \ud45c\uc2dd \ubc16\uc73c\ub85c":"\ubfcc\ub9ac \uc555\ucd95\uacfc \ub3c4\uc57d  \u00b7  \uc774\ub3d9 \uc720\uc9c0",
-                    BossPattern.DT06Burrow => boss.TargetLocked?"\ub3cc\ucd9c \uc704\uce58 \uace0\uc815  \u00b7  \ud45c\uc2dd \ubc16\uc73c\ub85c":"\ub545\uc18d\uc758 \uc6c0\uc9c1\uc784  \u00b7  \uba3c\uc9c0 \ud750\ub984\uc744 \uc77d\uc73c\uc138\uc694",
-                    _ => "\uc6c0\uc9c1\uc784\uc744 \uc77d\uace0 \ube48\ud2c8\uc5d0 \ubc18\uaca9"
+                text=boss.Pattern switch {
+                    BossPattern.DT01Slam => "높이 든 앞발  ·  턱 아래로 파고들기",
+                    BossPattern.DT02Sweep => "낮게 휘두르는 앞발  ·  점프 또는 바깥으로 거리 회피",
+                    BossPattern.DT03Bite => "벌어지는 입  ·  물기 범위에서 벗어나기",
+                    BossPattern.ARockfall => boss.AttackStage=="breathe"?"포효를 준비한다  ·  천장을 살피세요":"낙석이 시작된다  ·  공격할 순간을 찾으세요",
+                    BossPattern.BBurrowLeap => boss.AttackStage=="wave_delay" || boss.AttackStage=="wave"
+                        ? "착지 뒤 낮은 충격파  ·  뛰어넘기"
+                        : boss.TargetLocked ? "착지 위치 고정  ·  표식 밖으로 이동" : "땅속을 따라 움직인다  ·  착지 표식에 주의",
+                    _ => ""
                 };
-                Draw(new Rect(350,597,580,43),new Color(.04f,.06f,.055f,.91f));
-                GUI.Label(new Rect(356,601,568,32),text,centered);
-                Draw(new Rect(350,641,580*boss.StateProgress,2),new Color(.95f,.65f,.29f));
             }
             else if(boss.State==BossState.Recovery)
             {
-                GUI.Label(new Rect(350,601,580,32),"\ube48\ud2c8  \u00b7  \ub0ae\uc544\uc9c4 \ud131\uacfc \ubab8\ud1b5\uc5d0 \ubc18\uaca9",centered);
-                Draw(new Rect(560,641,160*(1-boss.StateProgress),2),mint);
+                text=boss.Pattern==BossPattern.DT01Slam || boss.Pattern==BossPattern.BBurrowLeap
+                    ? "큰 빈틈  ·  턱과 몸통에 반격" : "짧은 숨 고르기  ·  다음 움직임에 대비";
+                accent=mint;
             }
             else if(boss.State==BossState.Transition)
-            {
-                GUI.Label(new Rect(330,601,620,38),"\uac11\uc8fc\uac00 \ub5a8\uc5b4\uc9c0\uace0, \ubfcc\ub9ac\uac00 \ud480\ub824\ub09c\ub2e4",centered);
-            }
+                text="갑주가 떨어지고, 뿌리가 풀려난다";
+            if(text.Length==0)return;
+            Draw(new Rect(300,597,680,43),new Color(.04f,.06f,.055f,.91f));
+            GUI.Label(new Rect(306,601,668,32),text,centered);
+            // Only the genuine recovery receives the green opening marker.
+            if(boss.State==BossState.Recovery)
+                Draw(new Rect(560,641,160*(1-boss.StateProgress),2),accent);
         }
         private void DrawIntroduction()
         {
@@ -132,7 +143,8 @@ namespace FourGuardians.BossFight
             GUI.Label(new Rect(390,235,500,70),"\uc7a0\uc2dc \uc228\uc744 \uace0\ub974\uba70",centered);
             if(Button(new Rect(460,333,360,49),"\uacc4\uc18d\ud558\uae30    ESC",ink))session.TogglePause();
             if(Button(new Rect(460,397,360,49),"\ucc98\uc74c\ubd80\ud130    R",muted))session.Retry();
-            if(TextButton(new Rect(520,473,240,35),"\uc885\ub8cc"))session.Quit();
+            if(Button(new Rect(460,461,360,44),$"화면 진동 {Mathf.RoundToInt(session.CameraShake*100f)}%    F6",muted))session.CycleCameraShake();
+            if(TextButton(new Rect(520,528,240,35),"\uc885\ub8cc"))session.Quit();
         }
         private void DrawResult()
         {

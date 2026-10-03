@@ -20,7 +20,7 @@ namespace FourGuardians.BossFight
         private readonly float[] localHitFlash = new float[4];
         private readonly bool[] localHitArmor = new bool[4];
         private float lastRootX, horizontalSpeed;
-        private int consumedHitSequence;
+        private readonly Vector2[] localHitPoints = new Vector2[4];
         private string lastPosePattern = "", lastPoseStage = "idle";
         private float lastPoseProgress, lastFacing = -1f;
         private bool introApplied;
@@ -34,7 +34,20 @@ namespace FourGuardians.BossFight
         }
         public float VisualHeight => 4.3f;
         private Transform rig;
-        private Part body, nearPaw, farPaw, roots, jaw, mouth;
+        private Part body, nearPaw, farPaw, roots, jaw, mouth, airborneRoot;
+        private Bounds attackWarning, attackActive;
+        private bool hasAttackGeometry, airborneRootVisible;
+        public Vector2 MouthWorldPosition => mouth != null ? (Vector2)mouth.joint.position : (Vector2)transform.position;
+        public Vector2 NearHoofWorldPosition => HoofPoint(nearPaw);
+        public Vector2 FarHoofWorldPosition => HoofPoint(farPaw);
+
+        // Bounds remain combat-owned. These inputs only align painted limbs with their tells.
+        public void SetAttackGeometry(Bounds warning, Bounds active, float floorY)
+        {
+            attackActive = active; groundY = floorY;
+            if (warning.size.x > 0f) { attackWarning = warning; hasAttackGeometry = true; }
+            else if (presentationAttackStage != "recover") hasAttackGeometry = false;
+        }
         private readonly List<Sprite> sprites = new List<Sprite>();
         private readonly List<SpriteRenderer> renderers = new List<SpriteRenderer>();
         private readonly List<Part> parts = new List<Part>();
@@ -47,9 +60,7 @@ namespace FourGuardians.BossFight
         private int presentationPhase = 1, presentationArmorMask = 15;
         private string presentationAttackStage = "idle", presentationIntroStage = "hidden";
         private float presentationAttackProgress, presentationTransitionProgress, presentationIntroProgress;
-        private bool presentationUnderground, presentationTargetLocked, presentationHitHasArmor;
-        private Vector2 presentationHitPoint;
-        private int presentationHitRegion, presentationHitSequence;
+        private bool presentationUnderground, presentationTargetLocked;
         private readonly Queue<ArmorBreakVisualEvent> pendingArmorBreaks = new Queue<ArmorBreakVisualEvent>(4);
         private struct ArmorBreakVisualEvent { public int index, remainingMask; public Vector2 point; }
         public void SetCombatState(int phase, int armorMask, string attackStage, float attackProgress,
@@ -78,8 +89,12 @@ namespace FourGuardians.BossFight
         }
         public void OnLocalHit(Vector2 point, int region, bool hasArmor)
         {
-            presentationHitPoint = point; presentationHitRegion = Mathf.Clamp(region, 0, 3);
-            presentationHitHasArmor = hasArmor; presentationHitSequence++;
+            region = Mathf.Clamp(region, 0, 3);
+            // Keep separate hits in one frame, and let each mark follow the moving rig.
+            localHitPoints[region] = transform.InverseTransformPoint(point);
+            localHitFlash[region] = 1f;
+            localHitArmor[region] = hasArmor;
+            ApplyColors();
         }
 
 
@@ -221,72 +236,9 @@ namespace FourGuardians.BossFight
             Rotate(jaw,breath*.65f);
             Scale(mouth,1f,1f+breath*.018f);
             Rotate(roots,Mathf.Sin(Time.time*1.1f)*.55f);
-            bool tell = state == "telegraph", active = state == "active", recovery = state == "recovery";
-            float prepare = tell ? Ease(p) : active ? 1f : recovery ? 1f-Ease(p) : 0f;
-            float strike = active ? Ease(Mathf.Clamp01(p*4.5f)) : recovery ? 1f : 0f;
-            float recoil = recovery ? 1f-Ease(p) : 0f;
-            if (move.StartsWith("DT01"))
-            {
-                float lift = prepare*(1f-strike);
-                Shift(nearPaw,-1f*lift-1.90f*strike*prepare,1.24f*lift+.12f*strike*prepare);
-                Rotate(nearPaw,-56f*lift+12f*strike*prepare);
-                Rotate(farPaw,7f*prepare);
-                Shift(body,-.18f*strike*prepare,-.10f*strike*prepare);
-                Rotate(jaw,5f*lift);
-            }
-            else if (move.StartsWith("DT02"))
-            {
-                float sweep = active ? Ease(p) : recovery ? 1f : 0f;
-                Shift(nearPaw,.35f*prepare-2.10f*sweep*prepare,.35f*prepare*(1f-sweep)+.22f*sweep*prepare);
-                Rotate(nearPaw,-22f*prepare+47f*sweep*prepare);
-                Shift(farPaw,-.35f*sweep*prepare,.12f*prepare);
-                Rotate(body,1.5f*prepare);
-                Scale(roots,1f+.07f*prepare,1f-.07f*prepare);
-            }
-            else if (move.StartsWith("DT03"))
-            {
-                float gape = prepare*(1f-strike);
-                OpenMouth(gape);
-                Shift(body,-.34f*strike*prepare,.04f*gape);
-                Shift(jaw,-.24f*strike*prepare,.02f*gape);
-                Rotate(jaw,8f*gape-8f*strike*prepare);
-                Scale(mouth,1f+.11f*gape,1f+.15f*gape-.32f*strike*prepare);
-                Rotate(nearPaw,-7f*gape);
-                Shift(farPaw,-.12f*strike*prepare,0f);
-            }
-            else if (move.StartsWith("DT04"))
-            {
-                OpenMouth(prepare);
-                Scale(mouth,1f+.10f*prepare,1f+.08f*prepare);
-                Rotate(nearPaw,8f*prepare);
-                Rotate(farPaw,-6f*prepare);
-                Scale(roots,1f+.06f*prepare,1f);
-            }
-            else if (move.StartsWith("DT05"))
-            {
-                float rise = Mathf.Max(0f,transform.position.y-groundY);
-                float heightRatio = Mathf.Clamp01(rise/3.1f);
-                float tuck = Mathf.Max(heightRatio,tell ? Ease(p)*.6f : 0f);
-                Shift(nearPaw,.18f*tuck,.65f*tuck);
-                Rotate(nearPaw,-46f*tuck);
-                Shift(farPaw,.22f*tuck,.55f*tuck);
-                Rotate(farPaw,-33f*tuck);
-                // Keep the lower roots grounded during ascent, then let them tear free at the apex.
-                float detach = Mathf.SmoothStep(0f,1f,Mathf.InverseLerp(.82f,1f,heightRatio));
-                float stretch = rise*(1f-.23f*detach);
-                Shift(roots,.08f*heightRatio,-.10f*heightRatio);
-                Scale(roots,1f-.28f*heightRatio,1f+stretch/2.385f);
-                Rotate(roots,Mathf.Sin(Time.time*15f)*heightRatio*1.3f);
-                OpenMouth(.30f*tuck);
-                if (recovery)
-                {
-                    Scale(body,1f+.07f*recoil,1f-.11f*recoil);
-                    Shift(body,0f,-.10f*recoil);
-                    Scale(roots,1f+.16f*recoil,1f-.13f*recoil);
-                    Shift(nearPaw,-.28f*recoil,-.08f*recoil);
-                }
-            }
-            else if (move.StartsWith("MV01"))
+            airborneRootVisible = false;
+            ApplyAttackPose(move, state, p);
+            if (move.StartsWith("MV01"))
             {
                 float crawl = Time.time*5f;
                 Shift(nearPaw,Mathf.Sin(crawl)*.17f,Mathf.Max(0f,Mathf.Cos(crawl))*.15f);
@@ -304,12 +256,158 @@ namespace FourGuardians.BossFight
             }
             if (state == "dead") death = Mathf.Max(death,p);
             if (HasV2Artwork) ApplyV2CombatPose(move, state);
+            AlignAttackLimbs(move, state);
             ApplyDeath();
             ApplyVisibility();
             ApplyColors();
             UpdateGroundShadow();
         }
 
+        private void ApplyAttackPose(string move, string state, float fallbackProgress)
+        {
+            string step = presentationAttackStage;
+            float p = presentationAttackProgress;
+            if (step == "idle")
+            {
+                step = state == "telegraph" ? "tell" : state == "active" ? "strike" : state == "recovery" ? "recover" : state;
+                p = fallbackProgress;
+            }
+            bool tell = step == "tell", strike = step == "strike", recover = step == "recover";
+            float tension = tell ? Ease(p) : strike ? 1f : recover ? 1f-Ease(p) : 0f;
+            float impact = strike ? Ease(Mathf.Clamp01(p/.28f)) : recover ? 1f : 0f;
+            if (step == "link" || state == "link")
+            {
+                // Braced handoff stays distinct from a full recovery's relaxation.
+                Shift(body,-.12f,-.045f); Rotate(body,-1.2f);
+                Shift(nearPaw,-.22f,.08f); Rotate(nearPaw,-9f);
+                Shift(farPaw,-.12f,.035f); Scale(roots,1.04f,.97f);
+                OpenMouth(.22f); return;
+            }
+            if (move.StartsWith("DT01"))
+            {
+                float lift = tension*(1f-impact);
+                Shift(nearPaw,-.90f*lift-2.40f*impact*tension,1.65f*lift+.08f*impact*tension);
+                Rotate(nearPaw,-48f*lift+7f*impact*tension);
+                Shift(body,-.12f*impact*tension,-.10f*impact*tension);
+                Rotate(farPaw,6f*tension); Scale(roots,1f+.07f*impact*tension,1f);
+            }
+            else if (move.StartsWith("DT02"))
+            {
+                float sweep = strike ? Ease(p) : recover ? 1f : 0f;
+                // A low horizontal foreleg swing, with no independent wave.
+                Shift(nearPaw,(-.6f-2.6f*sweep)*tension,-.04f*tension);
+                Rotate(nearPaw,(-5f+10f*sweep)*tension);
+                Shift(farPaw,-.18f*sweep*tension,0f);
+                Rotate(body,1.5f*tension); Scale(roots,1f+.06f*tension,1f-.04f*tension);
+            }
+            else if (move.StartsWith("DT03"))
+            {
+                float gape = tension*(1f-impact);
+                // Expand the throat, then snap the jaw upward without lifting the boss off the floor.
+                Shift(body,-.50f*impact*tension,.11f*gape);
+                Shift(jaw,-.08f*gape,.28f*impact*tension);
+                Rotate(jaw,13f*gape-9f*impact*tension);
+                Scale(jaw,1f,1f-.12f*impact*tension);
+                Scale(mouth,1f+.11f*gape,1f+.15f*gape-.40f*impact*tension);
+                Rotate(nearPaw,-4f*gape); Shift(farPaw,-.12f*impact*tension,0f);
+            }
+            else if (move == "AROCKFALL")
+            {
+                if (step == "breathe")
+                {
+                    float inhale=Ease(p);
+                    OpenMouth(.30f*inhale); Scale(body,1f+.025f*inhale,1f+.045f*inhale);
+                    Scale(mouth,1f+.045f*inhale,1f+.08f*inhale);
+                    Rotate(nearPaw,-5f*inhale); Scale(roots,1f+.035f*inhale,1f);
+                }
+                else if (step == "roar")
+                {
+                    float burst=Mathf.Sin(Mathf.PI*Mathf.Clamp01(p));
+                    OpenMouth(.9f); Rotate(jaw,17f); Scale(mouth,1.12f,1.19f);
+                    Shift(body,.045f*Mathf.Sin(p*48f)*burst,.06f);
+                    Rotate(body,-2f); Shift(nearPaw,-.12f,0f); Shift(farPaw,-.1f,0f);
+                    Scale(roots,1.07f,1f);
+                }
+            }
+            else if (move == "BBURROWLEAP")
+            {
+                if (step == "submerge")
+                {
+                    float dig=Ease(p);
+                    Rotate(body,-11f*dig); Shift(nearPaw,-.32f*dig,.10f*dig); Rotate(nearPaw,21f*dig);
+                    Shift(farPaw,-.24f*dig,.08f*dig); Rotate(farPaw,16f*dig);
+                    Scale(roots,1f-.16f*dig,1f-.25f*dig);
+                }
+                else if (step == "rise" || step == "flight")
+                {
+                    float height=Mathf.Max(0f,transform.position.y-groundY);
+                    float tuck=Mathf.Clamp01(height/1.2f);
+                    Shift(nearPaw,.18f*tuck,.63f*tuck); Rotate(nearPaw,-35f*tuck);
+                    Shift(farPaw,.14f*tuck,.51f*tuck); Rotate(farPaw,-27f*tuck);
+                    Scale(roots,1f-.17f*tuck,1f-.15f*tuck);
+                    OpenMouth(.35f*tuck);
+                    if (airborneRoot != null)
+                    {
+                        airborneRootVisible=height>.035f;
+                        // Extend the reused sprite past its transparent bottom padding; the floor mask clips the excess.
+                        Scale(airborneRoot,1f,(2.38f+height)/2.16f);
+                    }
+                }
+                else if (step == "land" || step == "wave_delay" || step == "wave" || recover)
+                {
+                    float settle=step=="land"?1f-.45f*Ease(p):step=="wave_delay"?.55f:step=="wave"?.55f*(1f-Ease(p)):0f;
+                    Shift(body,0f,-.17f*settle); Scale(body,1f+.05f*settle,1f-.08f*settle);
+                    Shift(nearPaw,-.18f*settle,0f); Shift(farPaw,-.1f*settle,0f);
+                    Scale(roots,1f+.13f*settle,1f-.09f*settle);
+                }
+            }
+        }
+
+        private Vector2 HoofPoint(Part paw)
+        {
+            if (paw==null || paw.graphics.Count==0) return transform.position;
+            SpriteRenderer graphic=paw.graphics[0];
+            Bounds bounds=graphic.sprite.bounds;
+            return graphic.transform.TransformPoint(new Vector3(bounds.center.x,bounds.min.y+bounds.size.y*.10f,0f));
+        }
+
+        private void AlignAttackLimbs(string move,string state)
+        {
+            if (!hasAttackGeometry || presentationUnderground || state=="link") return;
+            string step=presentationAttackStage;
+            float p=presentationAttackProgress;
+            bool tell=step=="tell", strike=step=="strike", recover=step=="recover";
+            if (!tell && !strike && !recover) return;
+            float blend=tell?Ease(p):strike?1f:1f-Ease(p);
+            Vector2 target;
+            if (move.StartsWith("DT01"))
+            {
+                float fall=strike?Ease(Mathf.Clamp01(p/.28f)):recover?1f:0f;
+                target=new Vector2(attackWarning.center.x-lastFacing*.65f*(1f-fall),Mathf.Lerp(groundY+3.0f,groundY+.18f,fall));
+            }
+            else if (move.StartsWith("DT02"))
+            {
+                Bounds footprint=strike && attackActive.size.x>0f?attackActive:attackWarning;
+                float inner=lastFacing<0f?footprint.max.x:footprint.min.x;
+                float outer=lastFacing<0f?footprint.min.x:footprint.max.x;
+                float travel=strike?Ease(p):recover?1f:0f;
+                target=new Vector2(Mathf.Lerp(inner+lastFacing*.55f,outer-lastFacing*.55f,travel),groundY+.22f);
+            }
+            else return;
+            // Aim from the original shoulder so a distant strike never becomes a detached hoof.
+            Vector2 desired=Vector2.Lerp(HoofPoint(nearPaw),target,blend);
+            ResetPart(nearPaw);
+            SpriteRenderer hoof=nearPaw.graphics[0];
+            Bounds spriteBounds=hoof.sprite.bounds;
+            Vector3 toe=hoof.transform.TransformPoint(new Vector3(spriteBounds.center.x,spriteBounds.min.y+spriteBounds.size.y*.10f,0f));
+            Vector2 restToe=nearPaw.joint.InverseTransformPoint(toe);
+            Vector2 localTarget=nearPaw.joint.parent.InverseTransformPoint(desired)-(Vector3)nearPaw.restPosition;
+            float extension=localTarget.magnitude/Mathf.Max(.01f,restToe.magnitude);
+            float angle=Mathf.Atan2(localTarget.y,localTarget.x)*Mathf.Rad2Deg-Mathf.Atan2(restToe.y,restToe.x)*Mathf.Rad2Deg;
+            Rotate(nearPaw,angle); Scale(nearPaw,1f,extension);
+            // The cuff follows the shoulder but retains its own plate proportions.
+            if(armorParts[1]!=null) Scale(armorParts[1],1f,1f/Mathf.Max(.1f,extension));
+        }
         private void BuildV2Rig()
         {
             body = MakePart("BareIvoryBody", new Vector2(-.08f,.48f));
@@ -325,6 +423,9 @@ namespace FourGuardians.BossFight
             AddV2Visual(body,"BodyRear",atlas,back,Vector2.zero,new Vector2(-2.457f+4.55f*fraction,-.372f),new Vector2(4.55f*(1f-fraction),3.1f),13,2);
             roots=MakePart("RearRoots_NoHindLegs",new Vector2(1.20f,2.16f));
             AddV2(roots,"Roots",5,new Vector2(.4f,.9f),new Vector2(3.75f,2.40f),10,3);
+            // Reuse the existing root region behind the fan: no new anatomy or atlas region.
+            airborneRoot=MakePart("AirborneRoot_GroundConnection",new Vector2(1.22f,2.16f));
+            AddV2(airborneRoot,"ConnectedRearRoots",5,new Vector2(.5f,1f),new Vector2(.88f,2.16f),10,3);
             farPaw=MakeAttachedPart("FarForeleg_ClovenHoof",new Vector2(-1.95f,1.08f),body);
             AddV2(farPaw,"FarHoof",4,new Vector2(.5f,.86f),new Vector2(1.34f,1.25f),11,1);
             mouth=MakeAttachedPart("MouthCavity",new Vector2(-1.25f,1.62f),body);
@@ -383,7 +484,6 @@ namespace FourGuardians.BossFight
 
         private void ApplyV2CombatPose(string move,string state)
         {
-            float p=presentationAttackProgress;
             string step=presentationAttackStage;
             if(state=="idle" && Mathf.Abs(horizontalSpeed)>.08f)
             {
@@ -393,51 +493,6 @@ namespace FourGuardians.BossFight
                 Shift(farPaw,-Mathf.Sin(cycle)*.12f,Mathf.Max(0f,-Mathf.Cos(cycle))*.10f*light);
                 Shift(body,0f,Mathf.Abs(Mathf.Sin(cycle))*.025f*light);
                 Scale(roots,1f+Mathf.Sin(cycle-.7f)*.035f,1f);
-            }
-            if(move.StartsWith("DT05") && presentationPhase==2)
-            {
-                ResetPart(roots);ResetPart(nearPaw);ResetPart(farPaw);
-                float compression=step=="compress"?Ease(p):0f;
-                float tuck=step=="rise"?Ease(p):step=="lock"||step=="fall"?1f:0f;
-                if(step=="compress")
-                {
-                    Shift(body,0f,-.20f*compression);
-                    Scale(body,1f+.035f*compression,1f-.065f*compression);
-                    Scale(roots,1f-.18f*compression,1f-.42f*compression);
-                    Shift(roots,-.12f*compression,-.90f*compression);
-                }
-                if(tuck>0f)
-                {
-                    Shift(nearPaw,.18f*tuck,.57f*tuck);Rotate(nearPaw,-33f*tuck);
-                    Shift(farPaw,.17f*tuck,.52f*tuck);Rotate(farPaw,-27f*tuck);
-                    Scale(roots,1f-.30f*tuck,1f-.40f*tuck);
-                    Shift(roots,-.12f*tuck,.45f*tuck);
-                    Rotate(roots,-5f*tuck);
-                }
-                if(step=="land"||step=="recover")
-                {
-                    float settle=1f-Ease(p);
-                    Scale(roots,1f+.08f*settle,1f-.10f*settle);
-                    Shift(body,0f,-.12f*settle);Scale(body,1f+.05f*settle,1f-.09f*settle);
-                }
-            }
-            if(move.StartsWith("DT06"))
-            {
-                if(step=="submerge")
-                {
-                    Rotate(body,-12f*Ease(p));
-                    Shift(nearPaw,-.36f*Ease(p),.10f*Ease(p));Rotate(nearPaw,23f*Ease(p));
-                    Shift(farPaw,-.24f*Ease(p),.08f*Ease(p));Rotate(farPaw,17f*Ease(p));
-                    Scale(roots,1f-.20f*Ease(p),1f-.38f*Ease(p));
-                }
-                else if(step=="erupt")
-                {
-                    float burst=1f-Ease(p);
-                    Shift(body,0f,.15f*burst);Rotate(body,5f*burst);
-                    Rotate(nearPaw,-16f*burst);Rotate(farPaw,-10f*burst);
-                    Scale(roots,1f+.14f*burst,1f-.14f*burst);
-                    OpenMouth(.55f*burst);
-                }
             }
             if(state=="transition"||step=="transition")
             {
@@ -506,7 +561,7 @@ namespace FourGuardians.BossFight
             if(!preserveIntro)mainVisible=!presentationUnderground;
             foreach(SpriteRenderer renderer in renderers)
             {
-                bool visible=mainVisible;
+                bool visible=mainVisible && (airborneRoot==null || !airborneRoot.graphics.Contains(renderer) || airborneRootVisible);
                 if(armorByRenderer.TryGetValue(renderer,out int index))visible&=(presentationArmorMask&(1<<index))!=0;
                 renderer.enabled=visible;
             }
@@ -533,12 +588,6 @@ namespace FourGuardians.BossFight
         private void LateUpdate()
         {
             if(!built)return;
-            if(consumedHitSequence!=presentationHitSequence)
-            {
-                consumedHitSequence=presentationHitSequence;
-                localHitFlash[presentationHitRegion]=1f;
-                localHitArmor[presentationHitRegion]=presentationHitHasArmor;
-            }
             while(pendingArmorBreaks.Count>0)
             {
                 ArmorBreakVisualEvent info=pendingArmorBreaks.Dequeue();
@@ -680,8 +729,9 @@ namespace FourGuardians.BossFight
                     bool armored=armorByRenderer.ContainsKey(renderer);
                     float amount=localHitFlash[region];
                     if(armored!=localHitArmor[region])amount*=.12f;
-                    Vector3 nearest=renderer.bounds.ClosestPoint(presentationHitPoint);
-                    float distance=Vector2.Distance(nearest,presentationHitPoint);
+                    Vector2 hitPoint=transform.TransformPoint(localHitPoints[region]);
+                    Vector3 nearest=renderer.bounds.ClosestPoint(hitPoint);
+                    float distance=Vector2.Distance(nearest,hitPoint);
                     amount*=Mathf.Clamp01(1f-distance/1.35f);
                     partColor=Color.Lerp(partColor,armored?new Color(1f,.77f,.32f,1f):new Color(1f,.48f,.38f,1f),amount*.85f);
                 }
@@ -695,22 +745,32 @@ namespace FourGuardians.BossFight
         private static void Scale(Part part,float x,float y) { part.joint.localScale = new Vector3(x,y,1f); }
         private void ClearRig()
         {
-            if (rig != null) Destroy(rig.gameObject);
-            if (floorMask != null) Destroy(floorMask.gameObject);
-            foreach (PlateDebris plate in detachedPlates) if (plate.transform != null) Destroy(plate.transform.gameObject);
+            // Destroy is deferred until end of frame; hide the old rig before rebuilding.
+            if (rig != null) { rig.gameObject.SetActive(false); Destroy(rig.gameObject); }
+            if (floorMask != null) { floorMask.gameObject.SetActive(false); Destroy(floorMask.gameObject); }
+            foreach (PlateDebris plate in detachedPlates) if (plate.transform != null)
+            { plate.transform.gameObject.SetActive(false); Destroy(plate.transform.gameObject); }
             detachedPlates.Clear();regionByRenderer.Clear();armorByRenderer.Clear();pendingArmorBreaks.Clear();
             System.Array.Clear(localHitFlash,0,localHitFlash.Length);
             System.Array.Clear(localHitArmor,0,localHitArmor.Length);
+            System.Array.Clear(localHitPoints,0,localHitPoints.Length);
             System.Array.Clear(armorParts,0,armorParts.Length);
-            hornNear=null;hornFar=null;dorsalTrees=null;
-            if (groundShadow != null) Destroy(groundShadow.gameObject);
+            hornNear=null;hornFar=null;dorsalTrees=null;airborneRoot=null;
+            airborneRootVisible=false;hasAttackGeometry=false;attackWarning=default;attackActive=default;
+            if (groundShadow != null) { groundShadow.gameObject.SetActive(false); Destroy(groundShadow.gameObject); }
             foreach (Texture2D texture in runtimeTextures) if (texture != null) Destroy(texture);
             runtimeTextures.Clear();
             foreach (Sprite sprite in sprites) if (sprite != null) Destroy(sprite);
             foreach (Material material in textureMaterials.Values) if (material != null) Destroy(material);
             textureMaterials.Clear();
             sprites.Clear(); renderers.Clear(); parts.Clear(); built = false;
-            consumedHitSequence = presentationHitSequence;
+            rig=null;floorMask=null;groundShadow=null;
+            body=null;nearPaw=null;farPaw=null;roots=null;jaw=null;mouth=null;
+            flash=death=horizontalSpeed=0f;
+            lastRootX=transform.position.x;
+            lastPosePattern="";lastPoseStage="idle";lastPoseProgress=0f;lastFacing=-1f;
+            introApplied=false;mainVisible=true;
+            // Authoritative phase/armor inputs are retained; only transient visuals reset.
         }
         private void OnDestroy() { ClearRig(); }
     }
