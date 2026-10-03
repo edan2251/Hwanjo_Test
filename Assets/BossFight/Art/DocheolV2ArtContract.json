@@ -1,0 +1,401 @@
+{
+  "version": 2,
+  "coordinateConvention": "topLeftRect uses image top-left, unityRect uses Unity bottom-left; do not flip twice",
+  "atlasSize": {
+    "width": 1536,
+    "height": 1024
+  },
+  "parts": [
+    {
+      "name": "body",
+      "atlas": "DocheolV2Core.png",
+      "topLeftRect": {
+        "x": 43,
+        "y": 265,
+        "width": 975,
+        "height": 661
+      },
+      "unityRect": {
+        "x": 43,
+        "y": 98,
+        "width": 975,
+        "height": 661
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.55,
+        "y": 0.1
+      },
+      "alpha128Bounds": {
+        "x": 45,
+        "y": 267,
+        "width": 973,
+        "height": 657
+      }
+    },
+    {
+      "name": "lower_jaw",
+      "atlas": "DocheolV2Core.png",
+      "topLeftRect": {
+        "x": 1025,
+        "y": 131,
+        "width": 488,
+        "height": 338
+      },
+      "unityRect": {
+        "x": 1025,
+        "y": 555,
+        "width": 488,
+        "height": 338
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.88,
+        "y": 0.85
+      },
+      "alpha128Bounds": {
+        "x": 1027,
+        "y": 133,
+        "width": 484,
+        "height": 334
+      }
+    },
+    {
+      "name": "mouth_cavity",
+      "atlas": "DocheolV2Core.png",
+      "topLeftRect": {
+        "x": 1070,
+        "y": 489,
+        "width": 426,
+        "height": 465
+      },
+      "unityRect": {
+        "x": 1070,
+        "y": 70,
+        "width": 426,
+        "height": 465
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "alpha128Bounds": {
+        "x": 1072,
+        "y": 491,
+        "width": 422,
+        "height": 461
+      }
+    },
+    {
+      "name": "foreleg_near",
+      "atlas": "DocheolV2Supports.png",
+      "topLeftRect": {
+        "x": 45,
+        "y": 119,
+        "width": 437,
+        "height": 447
+      },
+      "unityRect": {
+        "x": 45,
+        "y": 458,
+        "width": 437,
+        "height": 447
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.7,
+        "y": 0.88
+      },
+      "alpha128Bounds": {
+        "x": 47,
+        "y": 121,
+        "width": 433,
+        "height": 443
+      }
+    },
+    {
+      "name": "foreleg_far",
+      "atlas": "DocheolV2Supports.png",
+      "topLeftRect": {
+        "x": 514,
+        "y": 170,
+        "width": 331,
+        "height": 388
+      },
+      "unityRect": {
+        "x": 514,
+        "y": 466,
+        "width": 331,
+        "height": 388
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.7,
+        "y": 0.88
+      },
+      "alpha128Bounds": {
+        "x": 516,
+        "y": 172,
+        "width": 329,
+        "height": 384
+      }
+    },
+    {
+      "name": "rear_roots",
+      "atlas": "DocheolV2Supports.png",
+      "topLeftRect": {
+        "x": 845,
+        "y": 97,
+        "width": 678,
+        "height": 478
+      },
+      "unityRect": {
+        "x": 845,
+        "y": 449,
+        "width": 678,
+        "height": 478
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.15,
+        "y": 0.88
+      },
+      "alpha128Bounds": {
+        "x": 845,
+        "y": 99,
+        "width": 676,
+        "height": 474
+      }
+    },
+    {
+      "name": "horn_near",
+      "atlas": "DocheolV2Supports.png",
+      "topLeftRect": {
+        "x": 45,
+        "y": 614,
+        "width": 504,
+        "height": 379
+      },
+      "unityRect": {
+        "x": 45,
+        "y": 31,
+        "width": 504,
+        "height": 379
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.2,
+        "y": 0.16
+      },
+      "alpha128Bounds": {
+        "x": 47,
+        "y": 616,
+        "width": 500,
+        "height": 375
+      }
+    },
+    {
+      "name": "horn_far",
+      "atlas": "DocheolV2Supports.png",
+      "topLeftRect": {
+        "x": 618,
+        "y": 682,
+        "width": 336,
+        "height": 301
+      },
+      "unityRect": {
+        "x": 618,
+        "y": 41,
+        "width": 336,
+        "height": 301
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.2,
+        "y": 0.18
+      },
+      "alpha128Bounds": {
+        "x": 620,
+        "y": 684,
+        "width": 332,
+        "height": 297
+      }
+    },
+    {
+      "name": "dorsal_trees",
+      "atlas": "DocheolV2Supports.png",
+      "topLeftRect": {
+        "x": 1002,
+        "y": 678,
+        "width": 517,
+        "height": 280
+      },
+      "unityRect": {
+        "x": 1002,
+        "y": 66,
+        "width": 517,
+        "height": 280
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.55,
+        "y": 0.08
+      },
+      "alpha128Bounds": {
+        "x": 1004,
+        "y": 680,
+        "width": 513,
+        "height": 276
+      }
+    },
+    {
+      "name": "forehead_crown",
+      "atlas": "DocheolV2Armor.png",
+      "topLeftRect": {
+        "x": 65,
+        "y": 97,
+        "width": 712,
+        "height": 372
+      },
+      "unityRect": {
+        "x": 65,
+        "y": 555,
+        "width": 712,
+        "height": 372
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "alpha128Bounds": {
+        "x": 67,
+        "y": 99,
+        "width": 708,
+        "height": 368
+      }
+    },
+    {
+      "name": "cheek_plate",
+      "atlas": "DocheolV2Armor.png",
+      "topLeftRect": {
+        "x": 176,
+        "y": 484,
+        "width": 416,
+        "height": 478
+      },
+      "unityRect": {
+        "x": 176,
+        "y": 62,
+        "width": 416,
+        "height": 478
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "alpha128Bounds": {
+        "x": 178,
+        "y": 486,
+        "width": 412,
+        "height": 474
+      }
+    },
+    {
+      "name": "shoulder_cuff",
+      "atlas": "DocheolV2Armor.png",
+      "topLeftRect": {
+        "x": 936,
+        "y": 111,
+        "width": 424,
+        "height": 365
+      },
+      "unityRect": {
+        "x": 936,
+        "y": 548,
+        "width": 424,
+        "height": 365
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "alpha128Bounds": {
+        "x": 938,
+        "y": 113,
+        "width": 420,
+        "height": 361
+      }
+    },
+    {
+      "name": "dorsal_plate",
+      "atlas": "DocheolV2Armor.png",
+      "topLeftRect": {
+        "x": 777,
+        "y": 518,
+        "width": 722,
+        "height": 423
+      },
+      "unityRect": {
+        "x": 777,
+        "y": 83,
+        "width": 722,
+        "height": 423
+      },
+      "suggestedPivotNormalizedBottomLeft": {
+        "x": 0.5,
+        "y": 0.5
+      },
+      "alpha128Bounds": {
+        "x": 779,
+        "y": 520,
+        "width": 718,
+        "height": 419
+      }
+    }
+  ],
+  "armorCombatBitOrder": [
+    "forehead_crown",
+    "shoulder_cuff",
+    "cheek_plate",
+    "dorsal_plate"
+  ],
+  "anatomyInvariants": [
+    "Exactly two permanent brown cloven goat hooves; no claws/fingers/hindlegs",
+    "Same complete bare body and forelegs in every armor state",
+    "Exactly two red dorsal trees in one persistent sprite",
+    "Four armor overlays detach; no armor or separate parts baked into core"
+  ],
+  "sourceImages": [
+    "Reference/V2/1000000334..png",
+    "Reference/V2/1000000333(2)..png",
+    "Reference/V2/docheol-armor-state-comparison-v3..png"
+  ],
+  "sourceAuthority": "Armored reference controls fixed two-tree layout; older naked reference supplies only ivory skin/folds/moss, never claws or extra trees. All three opened with view_image before generation.",
+  "generation": {
+    "tool": "built-in image_gen__imagegen",
+    "transparent_background": true,
+    "successfulCalls": 3,
+    "paidApiOrCliUsed": false,
+    "referenceMethod": "Local Windows referenced_image_paths failed immediately with AbsolutePathBuf error. Actual viewed images were referenced using num_last_images_to_include 3 for core,4 for supports,5 for armor.",
+    "prompts": {
+      "core": "Production pixel-art animation rig parts for the DoCheol creature in the three reference images. Reference 1 armored creature is authoritative for identity and compact body silhouette. Reference 2 old naked creature is ONLY for ivory skin folds and moss patches; do NOT copy its claws or many trees. Reference 3 confirms brown cloven goat hooves, same body under removable armor. Create a transparent-background sheet of exactly THREE isolated parts with generous spacing: LEFT 60% canvas: the naked CORE BODY AND UPPER HEAD facing LEFT, without any horns, arms, paws, hooves, roots, trees, armor or lower jaw. It is the pale ivory wrinkled body running from thick upper mouth rim with a few downward ivory teeth to the rounded rear torso, green moss patches across top and right. The enormous open mouth area must be an EMPTY TRANSPARENT CAVITY: a clear C-shaped upper-face frame, open along lower left, NO tongue, NO bottom teeth, NO lower lip baked into body. Sculpt skin around the right jaw hinge with enough overlap material; smoothly complete the hidden shoulder and horn attachment regions. RIGHT TOP quarter: matching detached LOWER JAW, grey-ivory fleshy curved chin/lip and upward teeth, no upper head, no tongue. RIGHT BOTTOM quarter: a matching separate burgundy MOUTH CAVITY lining with large dark throat and one tongue, no teeth or pale outer lip. Front view is three-quarter LEFT exactly as references. Consistent crisp detailed pixel-art clusters at a readable game-sprite scale, charcoal outlines, ivory lit folds, moss green patches, burgundy flesh, no tiny noisy texture. Never draw a whole assembled creature. No legs, claws, fingers, trees, horns, ground, shadows, player, labels, grids or text. Every sprite fully isolated with at least 50 transparent pixels between parts and canvas margins. Output 1536x1024 landscape if possible. True transparent alpha backdrop.",
+      "supports": "Production SUPPORT PARTS pixel-art atlas for DoCheol, consistent with the latest isolated ivory-skin core sheet. The first armored reference is authoritative for two permanent BROWN CLOVEN GOAT HOOVES and exactly TWO red dorsal trees. Old naked reference is skin texture ONLY; its fingers/claws are forbidden. Landscape sheet with SIX ISOLATED PARTS in a spacious 3-column 2-row arrangement. Top-left: NEAR FORELEG, a short thick pale ivory wrinkled goat-like foreleg angled down-left, green moss patches, ending in one broad brown CLOVEN HOOF with exactly TWO rounded wedge-shaped halves separated by a central cleft. NO fingers, NO nails, NO pointed claws, NO hand/paw, NO armor. The hoof is an inseparable part of the leg. Top-center: matching FAR FORELEG, same brown cloven goat hoof anatomy, slightly smaller and darker, not a duplicate hand. Top-right: large REAR ROOT FAN with five to seven major thick brown tree roots spreading down and right and moss accents, NO trees or skin or limbs; wide low triangular root mass to support a huge left-facing creature. Bottom-left: isolated LARGE NEAR WOODEN RAM HORN, curled forward arc with faceted brown bark segments and tiny moss drips, matches the reference. Bottom-center: isolated SMALL FAR WOODEN RAM HORN from the same reference, matching curve/material. Bottom-right: ONE isolated DORSAL TREE GROUP containing exactly TWO small rust-red bonsai-like trees on short thick brown trunks, front tree larger, rear tree smaller; same count/layout as armored reference. No extra trees anywhere. All parts have matching crisp pixel-art clusters, limited game palette, charcoal outlines, upper-left light, no antialias or painted gradients inside sprites. Transparent background with generous 50px gaps, no labels/text, no player/ground/grid/drop-shadows. Every part fully inside its own area, never touching another part. Forelegs must read as GOAT HOOVES, never monster claws. No full creature. True transparent alpha. 1536x1024 if possible.",
+      "armor": "Create FOUR independent WOODEN ARMOR OVERLAY sprites for the DoCheol in the first and third reference images, matching the generated naked core/supports sprite sheets. 2x2 atlas, true transparent background with generous 80px blank gaps between parts and 50px margins. Do NOT draw any body, mouth, teeth, hooves, horns, roots, trees, player, ground, shadows, labels or text. Top-left: FOREHEAD CROWN, a large broad moss-covered curved wooden forehead cap, arching across the upper face, front edge down-left, warm olive moss on top and thick faceted brown wood visible at side edge, no horn attached. It must cover the top ivory forehead from mouth brow toward back. Top-right: SHOULDER CUFF, a thick rounded half-cylinder bark armor over the near foreleg shoulder, like the segmented woody upper-arm guard in armored reference, open lower edge, moss on upper surface, no arm or hoof attached. Bottom-left: CHEEK PLATE, a large long tapered irregular bark slab matching the prominent warm brown side-of-head shield beneath the near horn in armored reference, distinct vertical woodgrain, beveled angular edges, small moss lip top, no horn attached. Bottom-right: DORSAL PLATE, a broad diagonal overlapping bark mantle of two joined large facets covering back/right torso above roots, moss green patches at upper edges, NO roots or trees. These are exactly FOUR physical detachable armor chunks that conceal pale skin and disappear independently; unarmored body stays complete beneath. Strong readable outer silhouettes, less tiny detail than illustration, crisp game pixel-art clusters with charcoal edges, warm bark brown, moss olive green, warm upper-left lighting. Three-quarter view facing LEFT. Keep each part fully separate, no connected shapes between cells. Armor should look organic heavy WOOD, no metal, no gold, no magic glow. Landscape 1536x1024 if possible."
+    }
+  },
+  "alphaValidation": {
+    "allThreeCornerAlpha": 0,
+    "coreGridStep": 4,
+    "coreMostFrequentAlphaCounts": {
+      "0": 61559,
+      "1": 1061,
+      "251": 1171,
+      "252": 11832,
+      "253": 19083
+    },
+    "note": "View-image preview can show RGB stored under alpha=0. No alpha rewriting or color-key processing applied."
+  },
+  "hashes": {
+    "DocheolV2Core": "83766DD824AD4FE7E5FFF1B583DA21A2FCB83E97538CFFB599A3BB9FCFBDDB07",
+    "DocheolV2Supports": "33686A93D6191EA9BBFB9C7BEC4C2DC83A91EB5BD4870855FA1E9BB991E206EC",
+    "DocheolV2Armor": "22558BA00B44D19C94E10A69851955179F61146B1790859E4DF4C2C764AB41AD"
+  },
+  "notes": [
+    "body right bound intentionally capped at x1018 to avoid detached jaw in upper-right corner of same atlas; rear edge can be concealed beneath roots/armor",
+    "rear_roots left bound capped at x845 to avoid separate far leg in upper-left of its atlas region",
+    "All PNG source bytes preserved unchanged. Rects include up to 2px padding around alpha>=128 bounds within safe regions.",
+    "Sprites are modular components requiring actual Unity render alignment QA; source sheet alone is not final assembly approval."
+  ]
+}

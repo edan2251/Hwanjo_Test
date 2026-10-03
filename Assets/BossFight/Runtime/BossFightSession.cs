@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using FourGuardians.CourseContent.Combat;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -17,14 +16,17 @@ namespace FourGuardians.BossFight
         [SerializeField] private Camera arenaCamera;
         [SerializeField] private DocheolVisual bossVisual;
         [SerializeField] private BossFightFeedback feedback;
+        private DocheolArenaEffects arenaEffects;
         private static bool restartImmediately;
         private static int attempts = 1;
-        private float elapsed, stateTime, hitStopUntil, bossFlash;
-        private string lastCue = "";
+        private float elapsed, stateTime, hitStopUntil, bossFlash, introTime;
+        private const float IntroDuration = 7f;
+        private string lastCue = "", lastIntroStage = "";
         private float cueTime;
         private uint lastAttackSequence;
         private EncounterState beforePause;
-        private bool ready;
+        private bool ready, qaIntro;
+        private Health2D bossHealth;
 
         public BossFightPlayerAdapter Player => player;
         public DoCheolBossController Boss => boss;
@@ -36,6 +38,10 @@ namespace FourGuardians.BossFight
         public string LastCue => lastCue;
         public float CueAge => Time.unscaledTime - cueTime;
         public bool IsQaContracts { get; private set; }
+        public bool IntroComplete { get; private set; }
+        public float IntroProgress => Mathf.Clamp01(introTime / IntroDuration);
+        public string IntroStage { get; private set; } = "buried";
+        public float IntroStageProgress { get; private set; }
         public event Action<EncounterState> StateChanged;
 
         public void SetReferences(BossFightPlayerAdapter p, DoCheolBossController b,
@@ -53,7 +59,11 @@ namespace FourGuardians.BossFight
             string[] args = Environment.GetCommandLineArgs();
             for (int i = 0; i < args.Length; i++)
             {
-                if (args[i] == "-bossqa" && i + 1 < args.Length) IsQaContracts = args[i + 1] == "contracts";
+                if (args[i] == "-bossqa" && i + 1 < args.Length)
+                {
+                    IsQaContracts = args[i + 1] == "contracts";
+                    qaIntro = args[i + 1] == "intro";
+                }
                 if (args[i] == "-bossqa-fps" && i + 1 < args.Length && int.TryParse(args[i + 1], out int fps))
                     Application.targetFrameRate = Mathf.Clamp(fps, 15, 240);
             }
@@ -63,7 +73,7 @@ namespace FourGuardians.BossFight
         {
             if (player == null || boss == null) { Debug.LogError("Boss encounter references are missing."); return; }
             player.Configure(8, .8f);
-            Health2D bossHealth = boss.GetComponent<Health2D>();
+            bossHealth = boss.GetComponent<Health2D>();
             bossHealth.Configure(40, CombatTeam.Enemy);
             bossHealth.ResetHealth();
             boss.Configure(player, bossHealth);
@@ -74,32 +84,70 @@ namespace FourGuardians.BossFight
             bossHealth.DamageTaken += OnBossDamaged;
             bossHealth.Died += OnBossDied;
             boss.Cued += OnBossCue;
+            boss.ArmorBroken += OnArmorBroken;
+            boss.LocalHit += OnLocalHit;
             feedback?.Configure(arenaCamera);
+            arenaEffects = GetComponent<DocheolArenaEffects>();
+            if (arenaEffects == null) arenaEffects = gameObject.AddComponent<DocheolArenaEffects>();
+            arenaEffects.Configure(this);
             ready = true;
             string[] args = Environment.GetCommandLineArgs();
             bool qa = Array.IndexOf(args, "-bossqa") >= 0;
-            if (restartImmediately || qa) { restartImmediately = false; StartFight(); }
+            if (restartImmediately || (qa && !qaIntro)) { restartImmediately = false; StartFight(); }
+            else UpdateIntroduction(0f);
         }
 
+        // ENTER and the on-screen skip button use this same entry point.
         public void StartFight()
         {
-            if (!ready || State == EncounterState.Fighting) return;
+            if (!ready || State != EncounterState.Introduction) return;
             Time.timeScale = 1f;
             hitStopUntil = 0f;
             elapsed = 0f;
+            introTime = IntroDuration;
+            IntroComplete = true;
+            IntroStage = "done";
+            IntroStageProgress = 1f;
+            arenaEffects?.ResetEffects();
+            bossVisual?.SetIntro("done", 1f);
             player.ResetForFight(new Vector2(-5.8f, .025f), 1);
             boss.ResetFight(new Vector2(3.2f, 0f));
-            boss.GetComponent<Health2D>().DamageEnabled = true;
+            bossHealth.DamageEnabled = true;
             boss.SetFightActive(!IsQaContracts);
             SetState(EncounterState.Fighting);
-            feedback?.PlayCue("start", Vector2.zero, 1f);
+            feedback?.PlayCue("start", Vector2.zero, .65f);
+        }
+
+        private void UpdateIntroduction(float delta)
+        {
+            introTime += delta;
+            if (introTime < .5f) SetIntroStage("buried", introTime / .5f);
+            else if (introTime < 1.85f) SetIntroStage("emerge", (introTime - .5f) / 1.35f);
+            else if (introTime < 4.6f) SetIntroStage("inhale", (introTime - 1.85f) / 2.75f);
+            else if (introTime < 5.2f) SetIntroStage("silence", (introTime - 4.6f) / .6f);
+            else if (introTime < 6.5f) SetIntroStage("roar", (introTime - 5.2f) / 1.3f);
+            else SetIntroStage("done", (introTime - 6.5f) / .5f);
+            player.Health.DamageEnabled = false;
+            bossHealth.DamageEnabled = false;
+            arenaEffects?.SetIntro(IntroStage, IntroStageProgress, boss.transform.position);
+            if (introTime >= IntroDuration) StartFight();
+        }
+
+        private void SetIntroStage(string stage, float progress)
+        {
+            IntroStage = stage;
+            IntroStageProgress = Mathf.Clamp01(progress);
+            if (lastIntroStage == stage) return;
+            lastIntroStage = stage;
+            if (stage != "buried" && stage != "done")
+                feedback?.PlayCue("intro_" + stage, boss.transform.position, .8f);
+            Debug.Log("[Docheol] INTRO " + stage);
         }
 
         private void Update()
         {
             if (!ready) return;
             stateTime += Time.unscaledDeltaTime;
-            if (State == EncounterState.Fighting) elapsed += Time.deltaTime;
             Keyboard keyboard = Keyboard.current;
             if (keyboard != null)
             {
@@ -109,6 +157,12 @@ namespace FourGuardians.BossFight
                 if (keyboard.escapeKey.wasPressedThisFrame) TogglePause();
                 if (keyboard.enterKey.wasPressedThisFrame && State == EncounterState.Introduction) StartFight();
                 if (keyboard.rKey.wasPressedThisFrame && State != EncounterState.Introduction) Retry();
+            }
+            if (State == EncounterState.Introduction) UpdateIntroduction(Time.deltaTime);
+            if (State == EncounterState.Fighting)
+            {
+                elapsed += Time.deltaTime;
+                player.Health.DamageEnabled = !player.IsDead && boss.State != BossState.Transition;
             }
             if (State != EncounterState.Paused && hitStopUntil > 0f && Time.unscaledTime >= hitStopUntil)
             {
@@ -121,21 +175,28 @@ namespace FourGuardians.BossFight
             if (State == EncounterState.Fighting && player.Movement.AttackSequence != lastAttackSequence)
             {
                 lastAttackSequence = player.Movement.AttackSequence;
-                feedback?.PlayCue("slash", player.transform.position, .55f);
+                feedback?.PlayCue("slash", player.transform.position, .36f);
             }
 
             if (bossVisual != null)
             {
+                bossVisual.SetCombatState(boss.Phase, boss.ArmorMask, boss.AttackStage, boss.AttackStageProgress,
+                    boss.TransitionProgress, boss.IsUnderground, boss.TargetLocked);
                 if (State == EncounterState.Victory) bossVisual.SetDead(Mathf.Clamp01(stateTime / 1.8f));
                 else
                 {
-                    string pattern = PatternCode(boss.Pattern);
-                    string stage = boss.State.ToString().ToLowerInvariant();
-                    bossVisual.SetPose(pattern, stage, boss.StateProgress, boss.Facing);
+                    bossVisual.SetPose(PatternCode(boss.Pattern), boss.State.ToString().ToLowerInvariant(),
+                        boss.StateProgress, boss.Facing);
+                    if (State == EncounterState.Introduction ||
+                        (State == EncounterState.Paused && beforePause == EncounterState.Introduction))
+                        bossVisual.SetIntro(IntroStage, IntroStageProgress);
                 }
-                bossFlash = Mathf.MoveTowards(bossFlash, 0f, Time.unscaledDeltaTime * 6f);
+                bossFlash = Mathf.MoveTowards(bossFlash, 0f, Time.unscaledDeltaTime * 9f);
                 bossVisual.SetFlash(bossFlash);
             }
+            if (State == EncounterState.Fighting && boss.Pattern == BossPattern.DT06Burrow)
+                arenaEffects?.SetBurrow(boss.AttackStage, boss.transform.position, boss.AttackStageProgress);
+            else arenaEffects?.SetBurrow("none", boss.transform.position, 0f);
             if (State == EncounterState.Fighting && player.transform.position.y < -4f && !player.Health.IsInvincible)
                 player.ReceiveAttack(int.MinValue, 8, Vector2.zero, gameObject);
         }
@@ -149,6 +210,7 @@ namespace FourGuardians.BossFight
                 BossPattern.DT03Bite => "DT03",
                 BossPattern.DT04Inhale => "DT04",
                 BossPattern.DT05BodySlam => "DT05",
+                BossPattern.DT06Burrow => "DT06",
                 _ => "MV01"
             };
         }
@@ -156,24 +218,34 @@ namespace FourGuardians.BossFight
         private void OnBossCue(string cue, Vector2 position, float strength)
         {
             lastCue = cue; cueTime = Time.unscaledTime;
-            feedback?.PlayCue(cue, position, strength);
+            if (cue != "armor_break") feedback?.PlayCue(cue, position, strength);
+        }
+        private void OnArmorBroken(int index, int mask, Vector2 point)
+        {
+            bossVisual?.OnArmorBroken(index, mask, point);
+            feedback?.ArmorBreak(point, 1);
+            HitStop(.045f);
+        }
+        private void OnLocalHit(Vector2 point, int region, bool hasArmor)
+        {
+            bossVisual?.OnLocalHit(point, region, hasArmor);
+            feedback?.BossHit(point, hasArmor);
         }
         private void OnPlayerDamaged(DamageInfo damage)
         {
             feedback?.PlayerHit(damage.HitPoint);
-            HitStop(.055f);
+            HitStop(.050f);
         }
         private void OnBossDamaged(DamageInfo damage)
         {
-            bossFlash = 1f;
-            feedback?.BossHit(damage.HitPoint);
-            HitStop(.032f);
+            bossFlash = .45f;
+            HitStop(boss.ArmorCount > 0 ? .018f : .025f);
         }
         private void HitStop(float duration)
         {
-            if (State != EncounterState.Fighting) return;
+            if (State != EncounterState.Fighting || boss.State == BossState.Transition) return;
             hitStopUntil = Mathf.Max(hitStopUntil, Time.unscaledTime + duration);
-            Time.timeScale = .08f;
+            Time.timeScale = .12f;
         }
         private void OnPlayerDied()
         {
@@ -191,8 +263,9 @@ namespace FourGuardians.BossFight
             hitStopUntil = 0f;
             Time.timeScale = 1f;
             boss.SetFightActive(false);
-            boss.GetComponent<Health2D>().DamageEnabled = false;
+            bossHealth.DamageEnabled = false;
             player.SetFightActive(false);
+            arenaEffects?.ResetEffects();
             SetState(result);
             Debug.Log($"[Docheol] {result}; seconds={elapsed:F2}; playerHp={player.Health.CurrentHealth}; attempt={attempts}");
         }
@@ -202,7 +275,7 @@ namespace FourGuardians.BossFight
         }
         public void TogglePause()
         {
-            if (State == EncounterState.Fighting)
+            if (State == EncounterState.Fighting || State == EncounterState.Introduction)
             {
                 beforePause = State;
                 SetState(EncounterState.Paused);
@@ -223,6 +296,7 @@ namespace FourGuardians.BossFight
             restartImmediately = true;
             attempts++;
             feedback?.ResetEffects();
+            arenaEffects?.ResetEffects();
             SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex);
         }
         public void Quit()
@@ -241,8 +315,9 @@ namespace FourGuardians.BossFight
             if (boss != null)
             {
                 boss.Cued -= OnBossCue;
-                Health2D health = boss.GetComponent<Health2D>();
-                if (health != null) { health.DamageTaken -= OnBossDamaged; health.Died -= OnBossDied; }
+                boss.ArmorBroken -= OnArmorBroken;
+                boss.LocalHit -= OnLocalHit;
+                if (bossHealth != null) { bossHealth.DamageTaken -= OnBossDamaged; bossHealth.Died -= OnBossDied; }
             }
         }
     }

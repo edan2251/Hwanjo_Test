@@ -84,19 +84,29 @@ namespace FourGuardians.BossFight.Editor
             GameObject visualObject=new GameObject("ArticulatedVisual");
             visualObject.transform.SetParent(bossObject.transform,false);
             DocheolVisual visual=visualObject.AddComponent<DocheolVisual>();
-            string[] texturePaths=AssetDatabase.FindAssets("t:Texture2D",new[]{"Assets/BossFight/Art"})
-                .Select(AssetDatabase.GUIDToAssetPath).ToArray();
-            string atlasPath=texturePaths.FirstOrDefault(p=>p.ToLowerInvariant().Contains("atlas"))??texturePaths.FirstOrDefault();
-            if(string.IsNullOrEmpty(atlasPath))throw new InvalidOperationException("Docheol atlas artwork has not been imported.");
-            TextureImporter importer=AssetImporter.GetAtPath(atlasPath) as TextureImporter;
-            if(importer!=null)
+            const string artRoot = "Assets/BossFight/Art/";
+            Texture2D core = LoadV2Texture(artRoot + "DocheolV2Core.png");
+            Texture2D supports = LoadV2Texture(artRoot + "DocheolV2Supports.png");
+            Texture2D armor = LoadV2Texture(artRoot + "DocheolV2Armor.png");
+            string contractPath = artRoot + "DocheolV2ArtContract.json";
+            if (!File.Exists(contractPath)) throw new InvalidOperationException("Missing V2 artwork contract: " + contractPath);
+            var contract = JsonUtility.FromJson<ArtContract>(File.ReadAllText(contractPath));
+            string[] names = { "body", "lower_jaw", "mouth_cavity", "foreleg_near", "foreleg_far",
+                "rear_roots", "horn_near", "horn_far", "dorsal_trees", "forehead_crown",
+                "cheek_plate", "shoulder_cuff", "dorsal_plate" };
+            if (contract == null || contract.parts == null || contract.parts.Length != names.Length)
+                throw new InvalidOperationException("V2 artwork contract must contain exactly thirteen parts.");
+            Rect[] regions = names.Select(name =>
             {
-                importer.isReadable=true;importer.filterMode=FilterMode.Point;
-                importer.textureCompression=TextureImporterCompression.Uncompressed;
-                importer.alphaIsTransparency=true;importer.mipmapEnabled=false;
-                importer.SaveAndReimport();
-            }
-            visual.Configure(AssetDatabase.LoadAssetAtPath<Texture2D>(atlasPath));
+                ArtPart part = contract.parts.SingleOrDefault(p => p.name == name);
+                if (part == null || part.topLeftRect == null || part.topLeftRect.width <= 0 || part.topLeftRect.height <= 0)
+                    throw new InvalidOperationException("Missing or invalid V2 part rectangle: " + name);
+                var r = part.topLeftRect;
+                return new Rect(r.x, r.y, r.width, r.height);
+            }).ToArray();
+            visual.ConfigureV2(core, supports, armor);
+            // The visual API accepts top-left pixels and performs the Unity bottom-left conversion once.
+            visual.ConfigureV2Regions(regions);
 
             GameObject systems=new GameObject("00_Encounter",typeof(BossFightSession),typeof(BossFightHud),typeof(BossFightFeedback));
             var feedback=systems.GetComponent<BossFightFeedback>();
@@ -105,7 +115,7 @@ namespace FourGuardians.BossFight.Editor
             EditorBuildSettings.scenes=new[]{new EditorBuildSettingsScene(ScenePath,true)};
             EditorSceneManager.playModeStartScene=AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath);
             PlayerSettings.companyName="Hwanjo";
-            PlayerSettings.productName="Hwanjo - Docheol";
+            PlayerSettings.productName="Hwanjo - Docheol / Unbound";
             PlayerSettings.defaultScreenWidth=1280;
             PlayerSettings.defaultScreenHeight=720;
             PlayerSettings.fullScreenMode=FullScreenMode.Windowed;
@@ -113,9 +123,28 @@ namespace FourGuardians.BossFight.Editor
             PlayerSettings.runInBackground=true;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone,ScriptingImplementation.Mono2x);
             AssetDatabase.SaveAssets();
-            Debug.Log("[Docheol] Scene built with original warrior: "+ScenePath+" | Atlas: "+atlasPath);
+            Debug.Log("[Docheol] V2 scene built with original warrior and three reference-based atlases: " + ScenePath);
         }
 
+        [Serializable] private sealed class ArtContract { public ArtPart[] parts; }
+        [Serializable] private sealed class ArtPart { public string name; public ArtRect topLeftRect; }
+        [Serializable] private sealed class ArtRect { public float x, y, width, height; }
+        private static Texture2D LoadV2Texture(string path)
+        {
+            var importer = AssetImporter.GetAtPath(path) as TextureImporter;
+            if (importer == null) throw new InvalidOperationException("V2 artwork has not been imported: " + path);
+            importer.isReadable = true;
+            importer.filterMode = FilterMode.Point;
+            importer.textureCompression = TextureImporterCompression.Uncompressed;
+            importer.alphaIsTransparency = true;
+            importer.mipmapEnabled = false;
+            importer.npotScale = TextureImporterNPOTScale.None;
+            importer.maxTextureSize = 2048;
+            importer.SaveAndReimport();
+            var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            if (texture == null) throw new InvalidOperationException("V2 texture could not be loaded: " + path);
+            return texture;
+        }
         private static Sprite MakeSquare()
         {
             string path=Generated+"/ArenaPixel.png";
@@ -159,13 +188,13 @@ namespace FourGuardians.BossFight.Editor
             try
             {
                 BuildScene();
-                string destination=Path.Combine(WorkRoot,"Deliverables","Hwanjo_Docheol","Hwanjo_Docheol.exe");
+                string destination=Path.Combine(WorkRoot,"Deliverables","Hwanjo_Docheol_V2","Hwanjo_Docheol_V2.exe");
                 Directory.CreateDirectory(Path.GetDirectoryName(destination));
                 var options=new BuildPlayerOptions{ scenes=new[]{ScenePath},locationPathName=destination,
                     target=BuildTarget.StandaloneWindows64,options=BuildOptions.None };
                 BuildReport report=BuildPipeline.BuildPlayer(options);
-                Directory.CreateDirectory(Path.Combine(WorkRoot,"QA"));
-                File.WriteAllText(Path.Combine(WorkRoot,"QA","build-summary.json"),
+                Directory.CreateDirectory(Path.Combine(WorkRoot,"QA","V2"));
+                File.WriteAllText(Path.Combine(WorkRoot,"QA","V2","build-summary.json"),
                     JsonUtility.ToJson(new BuildEvidence { result=report.summary.result.ToString(), errors=report.summary.totalErrors,
                     warnings=report.summary.totalWarnings,bytes=report.summary.totalSize,path=destination,
                     unity=Application.unityVersion,utc=DateTime.UtcNow.ToString("o") },true));

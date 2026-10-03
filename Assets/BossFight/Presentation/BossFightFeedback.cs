@@ -9,7 +9,7 @@ namespace FourGuardians.BossFight
     public sealed class BossFightFeedback : MonoBehaviour
     {
         private const int SampleRate = 22050;
-        private const int ParticleLimit = 80;
+        private const int ParticleLimit = 56;
         private static readonly Vector3 CameraRest = new Vector3(0f, 3.6f, -10f);
         private readonly Dictionary<string, AudioClip> clips = new Dictionary<string, AudioClip>();
         private readonly List<Debris> debris = new List<Debris>();
@@ -19,6 +19,7 @@ namespace FourGuardians.BossFight
         private AudioSource atmosphere;
         private Texture2D pixelTexture;
         private Sprite pixel;
+        private Material debrisMaterial;
         private float shakeRemaining;
         private float shakeDuration;
         private float shakeStrength;
@@ -35,6 +36,7 @@ namespace FourGuardians.BossFight
             public float Age;
             public float Lifetime;
             public float Spin;
+            public float Gravity = 8f;
             public Vector3 Scale;
             public Color Color;
         }
@@ -66,7 +68,7 @@ namespace FourGuardians.BossFight
             atmosphere.playOnAwake = false;
             atmosphere.spatialBlend = 0f;
             atmosphere.loop = true;
-            atmosphere.volume = 0.075f;
+            atmosphere.volume = 0.055f;
             atmosphere.priority = 180;
             if (camera != null && FindFirstObjectByType<AudioListener>() == null)
                 camera.gameObject.AddComponent<AudioListener>();
@@ -78,6 +80,9 @@ namespace FourGuardians.BossFight
             pixelTexture.Apply();
             pixel = Sprite.Create(pixelTexture, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f), 1f);
             pixel.name = "BossFight_RuntimeDebris";
+            Shader spriteShader = Shader.Find("Sprites/Default");
+            if (spriteShader != null)
+                debrisMaterial = new Material(spriteShader) { name = "BossFight_Debris_Unlit", mainTexture = pixelTexture };
 
             clips.Add("warning", Synthesize("Warning", 0.32f, 0));
             clips.Add("rumble", Synthesize("RootRumble", 0.65f, 1));
@@ -90,6 +95,13 @@ namespace FourGuardians.BossFight
             clips.Add("death", Synthesize("RootsCollapse", 1.20f, 8));
             clips.Add("victory", Synthesize("Victory", 1.80f, 9));
             clips.Add("air", Synthesize("QuietWind", 8f, 10));
+            clips.Add("wood", Synthesize("DryWoodChip", 0.14f, 11));
+            clips.Add("skin", Synthesize("IvorySkinImpact", 0.18f, 12));
+            clips.Add("armor", Synthesize("ArmorSplit", 0.55f, 13));
+            clips.Add("inhale", Synthesize("DevouringInhale", 2.75f, 14));
+            clips.Add("roar", Synthesize("LowRoar", 1.30f, 15));
+            clips.Add("lock", Synthesize("TargetLock", 0.16f, 16));
+            clips.Add("travel", Synthesize("BuriedTravel", 0.70f, 17));
             atmosphere.clip = clips["air"];
             Muted = muted;
             atmosphere.Play();
@@ -101,7 +113,32 @@ namespace FourGuardians.BossFight
             float amount = Mathf.Clamp(strength, 0.2f, 2f);
             switch (cue)
             {
-                case "start": Play("phase", position, 0.42f); break;
+                case "start":
+                    atmosphere.UnPause();
+                    if (!atmosphere.isPlaying) atmosphere.Play();
+                    Play("phase", position, 0.30f);
+                    break;
+                case "intro_emerge":
+                    Play("rumble", position, 0.80f);
+                    Shake(0.045f, 0.45f);
+                    break;
+                case "intro_inhale": Play("inhale", position, 0.63f); break;
+                case "intro_silence": effects.Stop(); atmosphere.Pause(); break;
+                case "intro_roar":
+                    Play("roar", position, 0.78f);
+                    Shake(0.075f, 0.38f);
+                    break;
+                case "armor_break": ArmorBreak(position, Mathf.RoundToInt(strength)); break;
+                case "compress": Play("wood", position, 0.55f); Play("rumble", position, 0.27f); break;
+                case "jump": Play("sweep", position, 0.64f); break;
+                case "lock": Play("lock", position, 0.68f); break;
+                case "submerge": Play("rumble", position, 0.68f); break;
+                case "travel": Play("travel", position, 0.48f); break;
+                case "erupt":
+                    Play("impact", position, 0.80f);
+                    Shake(0.13f, 0.23f);
+                    Burst(position, 12, new Color(0.48f, 0.42f, 0.29f), 0.85f);
+                    break;
                 case "slash": Play("sweep", position, 0.24f); break;
                 case "telegraph": Play("warning", position, 0.56f); break;
                 case "rise":
@@ -111,9 +148,13 @@ namespace FourGuardians.BossFight
                     break;
                 case "release": Play("rumble", position, 0.7f); break;
                 case "impact":
+                    Play("impact", position, 0.64f);
+                    Shake(0.055f * amount, 0.15f);
+                    Burst(position, 8, new Color(0.55f, 0.49f, 0.34f), amount * 0.7f);
+                    break;
                 case "land":
-                    Play("impact", position, 0.85f);
-                    Shake(0.14f * amount, 0.26f);
+                    Play("impact", position, 0.92f);
+                    Shake(0.16f * amount, 0.27f);
                     Burst(position, 14, new Color(0.55f, 0.49f, 0.34f), amount);
                     break;
                 case "sweep":
@@ -147,12 +188,24 @@ namespace FourGuardians.BossFight
             Burst(position, 7, new Color(0.87f, 0.43f, 0.31f), 0.65f);
         }
 
-        public void BossHit(Vector2 position)
+        public void BossHit(Vector2 position) => BossHit(position, true);
+
+        public void BossHit(Vector2 position, bool armored)
         {
             if (!configured) return;
-            Play("sword", position, 0.55f);
-            Shake(0.035f, 0.09f);
-            Burst(position, 6, new Color(0.93f, 0.81f, 0.53f), 0.52f);
+            // Ordinary hits are local: no camera shake, no whole-screen flash.
+            Play(armored ? "wood" : "skin", position, armored ? 0.66f : 0.60f);
+            Burst(position, armored ? 5 : 3,
+                armored ? new Color(0.60f, 0.43f, 0.25f) : new Color(0.84f, 0.78f, 0.62f),
+                armored ? 0.46f : 0.30f);
+        }
+
+        public void ArmorBreak(Vector2 position, int brokenCount)
+        {
+            if (!configured) return;
+            Play("armor", position, 0.80f);
+            Shake(Mathf.Lerp(0.09f, 0.12f, Mathf.Clamp01(brokenCount / 4f)), 0.20f);
+            Burst(position, 12, new Color(0.52f, 0.34f, 0.18f), 0.85f);
         }
 
         public void Victory()
@@ -214,6 +267,7 @@ namespace FourGuardians.BossFight
                 piece.transform.localScale = new Vector3(size * Range(1f, 2.4f), size, 1f);
                 SpriteRenderer renderer = piece.GetComponent<SpriteRenderer>();
                 renderer.sprite = pixel;
+                if (debrisMaterial != null) renderer.sharedMaterial = debrisMaterial;
                 renderer.sortingOrder = 24;
                 renderer.color = tint;
                 debris.Add(new Debris
@@ -242,7 +296,7 @@ namespace FourGuardians.BossFight
                     debris.RemoveAt(i);
                     continue;
                 }
-                piece.Velocity += Vector2.down * (8f * dt);
+                piece.Velocity += Vector2.down * (piece.Gravity * dt);
                 piece.Transform.position += (Vector3)(piece.Velocity * dt);
                 piece.Transform.Rotate(0f, 0f, piece.Spin * dt);
                 float remaining = 1f - piece.Age / piece.Lifetime;
@@ -255,70 +309,111 @@ namespace FourGuardians.BossFight
 
         private float Range(float min, float max) => Mathf.Lerp(min, max, (float)random.NextDouble());
 
+        // Single V2 synthesis pass. These clips are generated locally, not downloaded.
+        // Human listening validation is still required; numerical clipping bounds are not a listening test.
         private AudioClip Synthesize(string name, float duration, int kind)
         {
             int count = Mathf.CeilToInt(duration * SampleRate);
             float[] samples = new float[count];
-            float lowNoise = 0f;
+            float low = 0f, medium = 0f;
             double phase = 0;
             for (int i = 0; i < count; i++)
             {
                 float t = i / (float)SampleRate;
-                float progress = t / duration;
+                float p = t / duration;
                 float noise = Range(-1f, 1f);
-                lowNoise = Mathf.Lerp(lowNoise, noise, kind == 10 ? 0.007f : 0.035f);
+                low = Mathf.Lerp(low, noise, 0.014f);
+                medium = Mathf.Lerp(medium, noise, 0.19f);
+                float grain = medium - low;
                 float signal;
-                float envelope = Mathf.Min(1f, t / 0.008f) * Mathf.Pow(1f - progress, 2f);
+                float envelope = Mathf.Min(1f, t / 0.003f) * Mathf.Pow(1f - p, 2f);
                 switch (kind)
                 {
-                    case 0: // Two easily recognized warning taps.
-                        float pulse = Mathf.Repeat(t, 0.16f);
-                        signal = Mathf.Sin(2f * Mathf.PI * 640f * t) * Mathf.Exp(-pulse * 35f) * 0.45f;
+                    case 0:
+                        float pulse = Mathf.Repeat(t, 0.14f);
+                        signal = (Wave(460f, t) * 0.20f + grain * 0.65f) * Mathf.Exp(-pulse * 38f);
                         break;
                     case 1:
-                        signal = lowNoise * 1.4f + Mathf.Sin(t * 2f * Mathf.PI * 56f) * 0.35f;
+                        signal = low * 2.5f + Wave(57f, t) * 0.24f + Wave(83f, t) * 0.10f;
+                        envelope = Mathf.Sin(p * Mathf.PI) * Mathf.Min(1f, t / 0.025f);
                         break;
                     case 2:
-                        phase += 2.0 * Math.PI * Mathf.Lerp(115f, 38f, progress) / SampleRate;
-                        signal = (float)Math.Sin(phase) * 0.67f + noise * Mathf.Exp(-t * 70f) * 0.25f + lowNoise;
+                        phase += 2.0 * Math.PI * Mathf.Lerp(94f, 37f, p) / SampleRate;
+                        signal = (float)Math.Sin(phase) * 0.54f + grain * Mathf.Exp(-t * 24f) * 0.60f + low * 1.8f;
                         break;
                     case 3:
-                        signal = noise * 0.38f * Mathf.Sin(progress * Mathf.PI) + lowNoise;
+                        signal = grain * 0.75f;
+                        envelope = Mathf.Sin(p * Mathf.PI) * Mathf.Pow(1f - p, 0.5f);
                         break;
                     case 4:
-                        signal = noise * Mathf.Exp(-t * 32f) * 0.52f + Mathf.Sin(t * 2f * Mathf.PI * 125f) * 0.34f;
+                        signal = grain * Mathf.Exp(-t * 24f) * 0.80f + Wave(185f, t) * 0.20f;
                         break;
                     case 5:
-                        signal = (Mathf.Sin(t * 2f * Mathf.PI * 1480f) + Mathf.Sin(t * 2f * Mathf.PI * 2317f) * 0.6f) * Mathf.Exp(-t * 26f) * 0.42f;
+                        signal = (Wave(1430f, t) + Wave(2187f, t) * 0.45f) * Mathf.Exp(-t * 30f) * 0.28f;
                         break;
                     case 6:
-                        phase += 2.0 * Math.PI * Mathf.Lerp(235f, 105f, progress) / SampleRate;
-                        signal = (float)Math.Sin(phase) * 0.38f + lowNoise * 0.75f;
+                        phase += 2.0 * Math.PI * Mathf.Lerp(170f, 92f, p) / SampleRate;
+                        signal = (float)Math.Sin(phase) * 0.34f + grain * 0.6f;
                         break;
                     case 7:
-                        signal = Mathf.Sin(t * 2f * Mathf.PI * 180f) * 0.27f + Mathf.Sin(t * 2f * Mathf.PI * 270f) * 0.18f + lowNoise;
+                        signal = Wave(92f, t) * 0.20f + Wave(137f, t) * 0.10f + low * 2f;
                         break;
                     case 8:
-                        signal = lowNoise * 1.8f + Mathf.Sin(t * 2f * Mathf.PI * 45f) * 0.46f;
+                        signal = low * 3f + Wave(45f, t) * 0.35f + grain * Mathf.Exp(-t * 5f) * 0.3f;
                         break;
                     case 9:
                         float note = t < 0.3f ? 261.63f : t < 0.6f ? 329.63f : 392f;
                         phase += 2.0 * Math.PI * note / SampleRate;
-                        signal = ((float)Math.Sin(phase) + Mathf.Sin(t * 2f * Mathf.PI * 523.25f) * 0.2f) * 0.35f;
+                        signal = ((float)Math.Sin(phase) + Wave(523.25f, t) * 0.16f) * 0.27f;
                         envelope = Mathf.Min(1f, t / 0.03f) * Mathf.Min(1f, (duration - t) / 0.5f);
                         break;
+                    case 11: // Dry short wood resonances, rather than a sword-on-metal bell.
+                        signal = Wave(205f, t) * Mathf.Exp(-t * 34f) * 0.35f
+                            + Wave(467f, t) * Mathf.Exp(-t * 52f) * 0.21f
+                            + Wave(927f, t) * Mathf.Exp(-t * 85f) * 0.12f
+                            + grain * Mathf.Exp(-t * 80f) * 1.2f;
+                        break;
+                    case 12: // Dense, dull impact on exposed ivory skin.
+                        phase += 2.0 * Math.PI * Mathf.Lerp(132f, 76f, p) / SampleRate;
+                        signal = (float)Math.Sin(phase) * Mathf.Exp(-t * 24f) * 0.45f + low * 1.6f;
+                        break;
+                    case 13:
+                        float crack = Mathf.Exp(-t * 60f);
+                        if (t >= 0.027f) crack += Mathf.Exp(-(t - 0.027f) * 70f) * 0.7f;
+                        if (t >= 0.073f) crack += Mathf.Exp(-(t - 0.073f) * 65f) * 0.45f;
+                        signal = grain * crack * 1.2f + Wave(163f, t) * 0.22f + low * 1.7f;
+                        break;
+                    case 14:
+                        signal = grain * (0.16f + p * 0.55f) + low * 1.5f
+                            + Wave(67f, t) * (0.03f + p * 0.12f);
+                        envelope = Mathf.Min(1f, t / 0.4f) * Mathf.Min(1f, (duration - t) / 0.10f);
+                        break;
+                    case 15:
+                        phase += 2.0 * Math.PI * (62f - p * 17f + Mathf.Sin(t * 23f) * 2f) / SampleRate;
+                        signal = ((float)Math.Sin(phase) * 0.40f + low * 2f + grain * 0.18f)
+                            * (0.8f + 0.2f * Mathf.Sin(t * 41f));
+                        envelope = Mathf.Min(1f, t / 0.08f) * Mathf.Pow(1f - p, 0.7f);
+                        break;
+                    case 16:
+                        signal = Wave(620f, t) * Mathf.Exp(-t * 42f) * 0.23f + grain * Mathf.Exp(-t * 65f) * 0.8f;
+                        break;
+                    case 17:
+                        signal = low * 2.5f + grain * 0.18f + Wave(49f, t) * 0.13f;
+                        envelope = Mathf.Sin(p * Mathf.PI);
+                        break;
                     default:
-                        signal = lowNoise * 0.6f + Mathf.Sin(t * 2f * Mathf.PI * 55f) * (0.16f + 0.035f * Mathf.Sin(t * 2f * Mathf.PI * 0.5f));
+                        signal = low * 0.6f + Wave(55f, t) * (0.12f + 0.025f * Mathf.Sin(t * Mathf.PI));
                         envelope = Mathf.Min(1f, t / 0.3f) * Mathf.Min(1f, (duration - t) / 0.3f);
                         break;
                 }
-                samples[i] = Mathf.Clamp(signal * envelope * 0.65f, -0.85f, 0.85f);
+                samples[i] = Mathf.Clamp(signal * envelope * 0.65f, -0.80f, 0.80f);
             }
             AudioClip clip = AudioClip.Create("BossFight_" + name, count, 1, SampleRate, false);
             clip.SetData(samples, 0);
             return clip;
         }
 
+        private static float Wave(float frequency, float t) => Mathf.Sin(t * 2f * Mathf.PI * frequency);
         private void OnDisable()
         {
             if (effects != null) effects.Stop();
@@ -333,6 +428,7 @@ namespace FourGuardians.BossFight
             clips.Clear();
             if (pixel != null) Destroy(pixel);
             if (pixelTexture != null) Destroy(pixelTexture);
+            if (debrisMaterial != null) Destroy(debrisMaterial);
         }
     }
 }
