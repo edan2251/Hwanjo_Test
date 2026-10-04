@@ -108,6 +108,7 @@ namespace FourGuardians.BossFight
             if (RequestedMode != "observe") Time.timeScale = 1;
             bool controlled = RequestedMode == "v3matrix" || RequestedMode == "v3phases" || RequestedMode == "v3revision";
             report = new Report { mode = RequestedMode, utc = DateTime.UtcNow.ToString("o"), unityVersion = Application.unityVersion,
+                specVersion = RequestedMode == "armorvisual" ? "local-hit-armor-capture-r2" : "combo-rockfall-v3-contract-r1",
                 platform = Application.platform.ToString(), requestedFps = fps, inputStrategy = "V3 ordinary input; .2s recognition; actual Rigidbody2D physics samples",
                 usesSyntheticDamage = controlled || RequestedMode == "contracts" || RequestedMode == "v3contracts",
                 usesForcedPatterns = RequestedMode == "v3matrix" || RequestedMode == "v3revision", usesTestRepositioning = controlled || RequestedMode == "contracts" || RequestedMode == "v3contracts",
@@ -1004,7 +1005,7 @@ namespace FourGuardians.BossFight
                 yield return null; // Freeze scaled pose time before fixing the comparison.
                 visual.SetCombatState(1, 15, "idle", 0, 0, false, false);
                 visual.SetPose("", "idle", 0, -1);
-                visual.SetFlash(0);
+                visual.SetFlash(1); // Exercise the global flash used by the real session too.
                 SpriteRenderer forehead = VisualPart(visual, "ForeheadArmor");
                 SpriteRenderer dorsal = VisualPart(visual, "DorsalArmor");
                 SpriteRenderer shoulder = VisualPart(visual, "ShoulderArmor");
@@ -1016,6 +1017,8 @@ namespace FourGuardians.BossFight
                 visual.SetPose("", "idle", 0, -1);
                 Record("local_hits_same_frame", forehead.color.g < .95f && dorsal.color.g < .95f && shoulder.color == Color.white,
                     "foreheadG=" + forehead.color.g + " dorsalG=" + dorsal.color.g + " untouchedShoulder=" + shoulder.color);
+                Record("armored_hits_do_not_tint_skin", VisualPart(visual, "BodyFront").color == Color.white,
+                    "global flash=1 with armored local hit; underlying skin remains white");
                 Color foreheadColor = forehead.color, dorsalColor = dorsal.color;
                 visual.transform.position += Vector3.right * 2;
                 visual.SetPose("", "idle", 0, -1);
@@ -1029,6 +1032,14 @@ namespace FourGuardians.BossFight
                 // Exercise the real public reconfiguration path with queued debris and a death tint.
                 visual.SetDead(1); visual.SetFlash(1);
                 visual.OnArmorBroken(1, 13, shoulder.bounds.center);
+                if (!Application.isBatchMode) yield return new WaitForEndOfFrame();
+                yield return null; // Let LateUpdate materialize real detached armor before clearing it.
+                int existingDebris = 0;
+                foreach (SpriteRenderer part in FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None))
+                    if (part.name.StartsWith("DetachedArmor_")) existingDebris++;
+                Record("reconfigure_fixture_has_live_debris", existingDebris > 0,
+                    "detached plates before reconfiguration=" + existingDebris);
+                visual.OnArmorBroken(2, 9, shoulder.bounds.center); // Also leave a queued break.
                 visual.ConfigureV2(core, supports, armor);
                 int liveRigs = 0;
                 foreach (Transform child in visual.transform)
@@ -1055,14 +1066,14 @@ namespace FourGuardians.BossFight
                     anatomy[i] = VisualPart(visual, anatomyNames[i]);
                     matrices[i] = anatomy[i].transform.localToWorldMatrix;
                 }
-                int[] masks = { 15, 14, 12, 0 }; // V3 fixed armor order; rerun snapshots, do not reuse V2 results.
-                int[] counts = { 4, 3, 2, 0 };
+                int[] masks = { 15, 14, 12, 8, 0 }; // Include the transient last-plate transition stage.
+                int[] counts = { 4, 3, 2, 1, 0 };
                 Camera camera = Camera.main;
                 Vector3 cameraPosition = camera.transform.position;
                 float cameraSize = camera.orthographicSize;
                 for (int step = 0; step < masks.Length; step++)
                 {
-                    visual.SetCombatState(step == 3 ? 2 : 1, masks[step], "idle", 0, 0, false, false);
+                    visual.SetCombatState(masks[step] == 0 ? 2 : 1, masks[step], "idle", 0, 0, false, false);
                     visual.SetPose("", "idle", 0, -1);
                     int visible = 0, actualMask = 0;
                     for (int i = 0; i < armorNames.Length; i++)
@@ -1081,7 +1092,21 @@ namespace FourGuardians.BossFight
                         frame = lastCaptureFrame, screenshot = report.screenshots.Count > before ? report.screenshots[report.screenshots.Count - 1] : "",
                         position = initialPosition, cameraPosition = cameraPosition, orthographicSize = cameraSize, anatomyUnchanged = sameAnatomy });
                 }
+                // Exposed forehead/body with other plates still attached: this catches global tint leakage.
+                visual.SetCombatState(1, 14, "idle", 0, 0, false, false);
+                visual.SetPose("", "idle", 0, -1);
+                visual.SetFlash(1);
                 SpriteRenderer skin = VisualPart(visual, "BodyFront");
+                visual.OnLocalHit(skin.bounds.center, 0, false);
+                bool untouchedArmorWhite = true;
+                for (int i = 1; i < armorNames.Length; i++)
+                    untouchedArmorWhite &= VisualPart(visual, armorNames[i]).enabled && VisualPart(visual, armorNames[i]).color == Color.white;
+                Record("exposed_skin_hit_keeps_remaining_armor_white", skin.color.g < .95f && untouchedArmorWhite,
+                    "global flash=1; exposed skinG=" + skin.color.g + " three untouched plates white=" + untouchedArmorWhite);
+                presentationCaptureLabel = "exposed skin hit; three untouched armor plates";
+                yield return CaptureVisualFrame("local-hit-exposed-skin");
+                visual.SetCombatState(2, 0, "idle", 0, 0, false, false);
+                visual.SetPose("", "idle", 0, -1);
                 visual.OnLocalHit(skin.bounds.center, 0, false);
                 Record("unarmored_hit_material", skin.color.g < .95f && !VisualPart(visual, "ForeheadArmor").enabled,
                     "skinG=" + skin.color.g + " forehead plate remains hidden");
@@ -1094,9 +1119,9 @@ namespace FourGuardians.BossFight
                 Record("local_hit_fades", skin.color == Color.white, "skin after .20 scaled seconds=" + skin.color);
                 presentationCaptureLabel = "unarmored flash cleared";
                 yield return CaptureVisualFrame("local-hit-cleared");
-                Record("armor_comparison_capture_requests", !Application.isBatchMode && report.armorCaptures.Count == 4
+                Record("armor_comparison_capture_requests", !Application.isBatchMode && report.armorCaptures.Count == 5
                     && report.armorCaptures.TrueForAll(c => !string.IsNullOrEmpty(c.screenshot)),
-                    "four native screenshot requests; inspect output files separately");
+                    "five native screenshot requests; inspect output files separately");
             }
             finally
             {

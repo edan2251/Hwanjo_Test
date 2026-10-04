@@ -1,6 +1,6 @@
 # Docheol V3 contract revision QA
 
-The executable driver reports `combo-rockfall-v3-contract-r1`. Run reports, screenshots, logs, build identity and retained failures live outside the Unity project in `../../../../QA/V3/r1/`. The final selected results are in `verification.md`; the earlier V3 report is preserved in `../../../../QA/V3/baseline-963ed8e/verification.md`. Earlier counts do not certify this revision.
+Combat modes report `combo-rockfall-v3-contract-r1`; the updated `armorvisual` fixture reports `local-hit-armor-capture-r2`. Run reports, screenshots, logs, build identity and retained failures live outside the Unity project in `../../../../QA/V3/r1/`. The final selected results are in `verification.md`; the earlier V3 report is preserved in `../../../../QA/V3/baseline-963ed8e/verification.md`. Earlier counts do not certify this revision.
 
 ## Running
 
@@ -26,7 +26,7 @@ Exit 0 means all recorded assertions passed; exit 2 preserves failures. Never ov
 | `victory` / `survival` | Ordinary input with no forced attacks, synthetic damage, HP/position resets or altered invulnerability during combat. Victory includes production retry. Survival requires alive at the end. |
 | `defeat` / `mash` | Actual normal boss damage and death; defeat also checks retry/input blocking. Mash requires engagement and death, not merely failing to reach the boss. |
 | `intro` | Intro protection/shared StartFight entry/retry. `-bossqa-intro-wait 8` observes full natural introduction. API-driven checks do not certify physical Enter input. |
-| `armorvisual` | Presentation-only fixed camera/root/idle masks15/14/12/0, unchanged body/two horns/two trees/two hooves, independent local hits, fade and rig reset. Explicit override label. Does not prove natural HP progression. |
+| `armorvisual` | Presentation-only fixed camera/root/idle masks15/14/12/8/0, unchanged body/two horns/two trees/two hooves, independent local hits, fade and rig reset. Explicit override label. Does not prove natural HP progression. |
 | `observe` | Passive observer preserves real keyboard and introduction. No SubmitInput, forced pattern, synthetic damage, teleport or retry API. Its one error assertion is separate from external Windows key logs and visual judgments. |
 
 ## Combat and input measurements
@@ -49,9 +49,19 @@ Raw physical evidence checks locked target stability, positive active steps for 
 
 ## Aligned armor and local-hit captures
 
-Run `-bossqa armorvisual -bossqa-fps 60 -bossqa-output <report.json> -bossqa-capture <directory> -logFile <log.txt>` and repeat at 30 FPS. This presentation-only fixture freezes scaled time, disables combat/session/HUD updates and labels its images explicitly. The four snapshots use masks15,14,12,0, corresponding to four, three, two and zero attached plates. The transient one-plate transition is tested by `v3phases`, not included as a settled comparison pose. `armorCaptures` records each actual mask/count, frame, camera position/size, root position and screenshot request. Both hooves, both horns, body and the existing two-tree sprite must keep their identities and transforms.
+Run `-bossqa armorvisual -bossqa-fps 60 -bossqa-output <report.json> -bossqa-capture <directory> -logFile <log.txt>` and repeat at 30 FPS. This presentation-only fixture freezes scaled time, disables combat/session/HUD updates and labels its images explicitly. The five snapshots use masks15,14,12,8,0, corresponding to four, three, two, one and zero attached plates. The one-plate image is a fixed idle visual comparison of the transient transition stage; it does not claim that production combat pauses in this pose. `armorCaptures` records each actual mask/count, frame, camera position/size, root position and screenshot request. Both hooves, both horns, body and the existing two-tree sprite must keep their identities and transforms.
 
-The same mode checks independent simultaneous forehead/dorsal flashes, an untouched white shoulder, marks following rig translation, bare-skin color/fade, and `ConfigureV2` clearing hit/death state and queued debris with exactly one active rig before deferred destruction. Seven native images cover the two-region hit, four armor levels, the skin hit and its cleared state. Native capture requests wait across rendering boundaries; missing capture output/batch mode fails request checks. Actual PNG contents and existence require separate inspection. No image-generation or replacement artwork is used.
+The same mode checks independent simultaneous forehead/dorsal flashes with the session's whole-body flash set to one, untouched white shoulder and underlying skin, marks following rig translation, exposed-skin color with three untouched plates, bare-skin color/fade, and `ConfigureV2` clearing hit/death state plus both live and queued debris with exactly one active rig before deferred destruction. Nine native images cover the two-region hit, five armor levels, the exposed-skin hit, the bare-skin hit and its cleared state (plus the generic start and completion captures). Articulated V2 artwork uses only local hit tint; legacy single-atlas artwork retains its global flash. Native capture requests wait across rendering boundaries; missing capture output/batch mode fails request checks. Actual PNG contents and existence require separate inspection. No image-generation or replacement artwork is used.
+
+Validated follow-up results: [verification](../../../../QA/VisualFollowup_20261004/verification.md). The separately preserved Windows build uses Unity6000.3.23f1. Visible `armorvisual` and `v3phases` runs at 30 and 60 FPS passed 70 assertions, with zero runtime errors; all 36 requested PNG files were checked at1280x720. The first four hidden-window runs failed native screenshot capture and remain in the evidence folder. They are not counted as successful runs. Native screenshot verification requires a visible game window; short capture-heavy runs are not an FPS benchmark.
+
+| Attached armor | Mask | Fixed comparison at60 FPS | Fixed comparison at30 FPS |
+| --- | --- | --- | --- |
+| 4 | 15 | [4 plates](../../../../QA/VisualFollowup_20261004/captures-armorvisual60-visible/03-armor-compare-4-mask15.png) | [4 plates](../../../../QA/VisualFollowup_20261004/captures-armorvisual30-visible/03-armor-compare-4-mask15.png) |
+| 3 | 14 | [3 plates](../../../../QA/VisualFollowup_20261004/captures-armorvisual60-visible/04-armor-compare-3-mask14.png) | [3 plates](../../../../QA/VisualFollowup_20261004/captures-armorvisual30-visible/04-armor-compare-3-mask14.png) |
+| 2 | 12 | [2 plates](../../../../QA/VisualFollowup_20261004/captures-armorvisual60-visible/05-armor-compare-2-mask12.png) | [2 plates](../../../../QA/VisualFollowup_20261004/captures-armorvisual30-visible/05-armor-compare-2-mask12.png) |
+| 1 | 8 | [1 plates](../../../../QA/VisualFollowup_20261004/captures-armorvisual60-visible/06-armor-compare-1-mask8.png) | [1 plates](../../../../QA/VisualFollowup_20261004/captures-armorvisual30-visible/06-armor-compare-1-mask8.png) |
+| 0 | 0 | [0 plates](../../../../QA/VisualFollowup_20261004/captures-armorvisual60-visible/07-armor-compare-0-mask0.png) | [0 plates](../../../../QA/VisualFollowup_20261004/captures-armorvisual30-visible/07-armor-compare-0-mask0.png) |
 
 These forced visual masks cannot certify natural armor thresholds. `v3phases` applies disclosed synthetic HP changes through the real controller and checks HP30/24/20, the protected transition, fixed piece order independent of hit location, and zero armor in P2.
 

@@ -720,7 +720,9 @@ namespace FourGuardians.BossFight
         private void ApplyColors()
         {
             Color color = Color.Lerp(Color.white,new Color(.35f,.31f,.27f,1f),death*.72f);
-            color = Color.Lerp(color,new Color(1f,.57f,.42f,1f),flash*(HasV2Artwork ? .12f : .82f));
+            // Articulated artwork uses the actual local hit/material, including exposed skin.
+            // The session's legacy whole-body flash must not tint untouched armor.
+            if (!HasV2Artwork) color = Color.Lerp(color,new Color(1f,.57f,.42f,1f),flash*.82f);
             foreach (SpriteRenderer renderer in renderers)
             {
                 Color partColor=color;
@@ -728,7 +730,7 @@ namespace FourGuardians.BossFight
                 {
                     bool armored=armorByRenderer.ContainsKey(renderer);
                     float amount=localHitFlash[region];
-                    if(armored!=localHitArmor[region])amount*=.12f;
+                    if(armored!=localHitArmor[region])amount=0f;
                     Vector2 hitPoint=transform.TransformPoint(localHitPoints[region]);
                     Vector3 nearest=renderer.bounds.ClosestPoint(hitPoint);
                     float distance=Vector2.Distance(nearest,hitPoint);
