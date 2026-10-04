@@ -5,8 +5,8 @@ using FourGuardians.CourseContent.Movement;
 using UnityEngine;
 namespace FourGuardians.BossFight
 {
-    public enum BossState { Dormant, Idle, Telegraph, Active, Recovery, Transition, Dead, Link, Waiting, Followup }
-    public enum BossPattern { None, DT01Slam, DT02Sweep, DT03Bite, DT04Inhale, DT05BodySlam, DT06Burrow, ARockfall, BBurrowLeap }
+    public enum BossState { Dormant, Idle, Telegraph, Active, Recovery, Transition, Dead, Link, Waiting, Followup, Turning, Settling, Reposition, Backdash }
+    public enum BossPattern { None, DT01Slam, DT02Sweep, DT03Bite, DT04Inhale, DT05BodySlam, DT06Burrow, ARockfall, BBurrowLeap, WholeBodyBite }
     public sealed class DoCheolBossController : MonoBehaviour
     {
         public event Action<string, Vector2, float> Cued;
@@ -30,6 +30,18 @@ namespace FourGuardians.BossFight
         public float BurrowCooldownRemaining => Mathf.Max(0f, nextBurrowTime - encounterTime);
         public float RockfallCooldownRemaining => Mathf.Max(0f, nextRockfallTime - encounterTime);
         public int Facing { get; private set; } = -1;
+        public bool ControlsLocked => State == BossState.Transition;
+        public bool Turning => State == BossState.Turning;
+        public int TurnFromFacing { get; private set; } = -1;
+        public int TurnToFacing { get; private set; } = -1;
+        public int TurnCount { get; private set; }
+        public int BackdashCount { get; private set; }
+        public int RepositionCount { get; private set; }
+        public float BackdashCooldownRemaining => Mathf.Max(0f, nextBackdashTime - encounterTime);
+        public float MouthMinimumReach => .9f;
+        public float MouthMaximumReach => 3.5f;
+        public float PawMinimumReach => -.65f;
+        public float PawMaximumReach => 4.2f;
         public int AttackId { get; private set; }
         public int LastCompletedAttackId { get; private set; }
         public float TargetX { get; private set; }
@@ -44,6 +56,7 @@ namespace FourGuardians.BossFight
         public int ComboLength => combo.Length;
         public bool IsComboFollowup => ComboIndex > 0 && combo.Length > 1;
         public bool FightActive => fightActive;
+        public float EncounterSeconds => encounterTime;
         public bool RockfallActive => rockfallEnd > encounterTime || rocks.Count > 0;
         public float RockfallRemaining => Mathf.Max(0f, rockfallEnd - encounterTime);
         public IReadOnlyList<DocheolRockfall> Rockfalls => rocks.AsReadOnly();
@@ -59,23 +72,44 @@ namespace FourGuardians.BossFight
         public string SafetyWaitReason { get; private set; } = "";
         public int RockfallSeed => rockfallSeed;
         public IReadOnlyList<RockfallSize> RockfallSizeDraws => rockSizeDraws.AsReadOnly();
+        public bool EntryRockfallUsed { get; private set; }
+        public bool LateRockfallUsed { get; private set; }
+        public bool LateRockfallPending { get; private set; }
+        public int RockfallEventCount { get; private set; }
+        public int WholeBodyAttackCount { get; private set; }
+        public int WholeFirstSide { get; private set; }
+        public int WholeSwingSide { get; private set; }
+        public Bounds SecondaryWarningBounds { get; private set; }
+        public float WaveDelayDuration => waveDelay;
+        public float WaveTravelDuration => waveDuration;
+        public float WholeRecoveryDuration => wholeRecovery;
         public float ArenaLeft = -9.5f, ArenaRight = 9.5f, FloorY;
         [Header("Basic attack timing")]
         [SerializeField] private float biteTell = 0.95f, biteStrike = 0.16f, biteRecovery = 0.30f;
         [SerializeField] private float sweepTell = 0.50f, sweepFollowupTell = 0.30f, sweepStrike = 0.16f, sweepRecovery = 0.34f;
-        [SerializeField] private float sweepComboAdvance = 3.5f;
-        [SerializeField] private float slamTell = 1.08f, slamStrike = 0.20f, slamRecovery = 1.35f, slamAdvance = 0.90f;
+        [SerializeField] private float sweepComboAdvance = 0f;
         [SerializeField] private float comboLink = 0.08f, reactionMargin = 0.20f;
+        [Header("Grounded preparation")]
+        [SerializeField] private float turnDuration = .78f, settleDuration = .14f;
+        [SerializeField] private float repositionSpeed = 3f, backdashSpeed = 8.5f, backdashCooldown = 4.8f;
+        private float nextBackdashTime, spacingDestination;
+        private string preparedPlan;
         [Header("A: grounded roar and persistent rockfall")]
-        [SerializeField] private int rockfallUnlockHealth = 28;
         [SerializeField] private float rockfallCooldown = 18f, rockfallDuration = 5.5f, rockfallInterval = 0.58f;
         [SerializeField] private float breatheDuration = 0.55f, roarDuration = 0.60f, escapeCorridorWidth = 2.2f;
         [SerializeField] private int rockfallSeed = 20261003;
         [Header("B: underground travel and forward landing")]
         [SerializeField] private float burrowCooldown = 12f, submergeDuration = 0.48f, travelDuration = 0.65f;
         [SerializeField] private float riseDuration = 0.48f, flightDuration = 0.85f, leapHeight = 4.2f;
-        [SerializeField] private float landingDuration = 0.16f, landingWidth = 4.4f, waveDelay = 0.32f, waveDuration = 0.65f, leapRecovery = 1.15f;
+        [SerializeField] private float landingDuration = 0.16f, landingWidth = 4.4f, waveDelay = 0.44f, waveDuration = 0.90f, leapRecovery = 1.15f;
         [SerializeField] private float burrowFollowupBrace = 0.24f, burrowFollowupTell = 0.90f;
+        [Header("Phase-two whole-body bite")]
+        [SerializeField] private float wholeTell=1.05f,wholeArc=.20f,wholeContact=.16f,wholeBridge=1.05f,wholeRecovery=1.70f,wholeCooldown=8.5f;
+        [SerializeField] private int lateRockfallHealth=10;
+        private float nextWholeTime;
+        private Bounds wholeFirstBounds,wholeSecondBounds;
+        private bool wholeSecondIdAllocated;
+        private SpriteRenderer wholeSecondWarning;
         private BossFightPlayerAdapter player;
         private Health2D health;
         private BoxCollider2D hurtCollider;
@@ -109,7 +143,7 @@ namespace FourGuardians.BossFight
         private int rockSequence, completedSequences;
         private static int nextAttackId = 200000;
         private static readonly string[] PhaseOneCombos = { "3", "2", "3-2" };
-        private static readonly string[] PhaseTwoCombos = { "3", "2", "1", "3-2", "2-1", "3-2-1" };
+        private static readonly string[] PhaseTwoCombos = { "3", "2", "3-2" };
         public void Configure(BossFightPlayerAdapter newPlayer, Health2D newHealth)
         {
             if (health != null) { health.Died -= OnDied; health.DamageTaken -= OnDamageTaken; }
@@ -139,7 +173,10 @@ namespace FourGuardians.BossFight
         {
             fightActive = false; ClearRockfall();
             transform.position = new Vector3(position.x, FloorY, transform.position.z);
-            Facing = -1; Phase = 1; ArmorMask = 15; threshold75 = threshold60 = phasePending = false;
+            Facing = TurnFromFacing = TurnToFacing = -1; Phase = 1; ArmorMask = 15; threshold75 = threshold60 = phasePending = false;
+            TurnCount = BackdashCount = RepositionCount = 0; nextBackdashTime = nextWholeTime = 0; preparedPlan = null;
+            EntryRockfallUsed=LateRockfallUsed=LateRockfallPending=false;RockfallEventCount=WholeBodyAttackCount=0;
+            WholeFirstSide=WholeSwingSide=-1;SecondaryWarningBounds=default;wholeSecondIdAllocated=false;
             LastHitRegion = -1; LastHitPoint = position; encounterTime = nextBurrowTime = nextRockfallTime = 0f;
             rockSequence = completedSequences = RejectedRockfallPlacements = 0;
             rockRandom = new System.Random(rockfallSeed); rockSizeDraws.Clear();
@@ -155,12 +192,15 @@ namespace FourGuardians.BossFight
             if (!CanForce()) return false;
             switch (pattern)
             {
-                case BossPattern.DT01Slam: return ForceCombo("1");
+                case BossPattern.DT01Slam: return false; // Retired in both phases.
                 case BossPattern.DT02Sweep: return ForceCombo("2");
                 case BossPattern.DT03Bite: return ForceCombo("3");
                 case BossPattern.ARockfall:
-                    if (health.CurrentHealth > rockfallUnlockHealth || RockfallActive || BurrowPackageActive) return false;
-                    BeginSpecial(pattern); return true;
+                    if (Phase!=2 || LateRockfallUsed || RockfallActive || BurrowPackageActive) return false;
+                    LateRockfallUsed=true;LateRockfallPending=false;BeginSpecial(pattern); return true;
+                case BossPattern.WholeBodyBite:
+                    if(Phase!=2 || RockfallActive || BurrowPackageActive)return false;
+                    FacePlayer();BeginWholeBodyBite();return true;
                 case BossPattern.BBurrowLeap:
                     if (RockfallActive || Pattern == BossPattern.ARockfall && State != BossState.Recovery) return false;
                     BeginSpecial(pattern); return true;
@@ -172,7 +212,7 @@ namespace FourGuardians.BossFight
             if (!CanForce() || Array.IndexOf(Phase == 1 ? PhaseOneCombos : PhaseTwoCombos, code) < 0) return false;
             if (RockfallActive && (!EscapePreviewAvailable || !FindTimedEscape(default, false, 0f, code, false))) return false;
             transform.position = new Vector3(ClampBodyX(transform.position.x), FloorY, transform.position.z);
-            BeginCombo(code); return true;
+            FacePlayer(); BeginCombo(code); return true; // Controlled initial QA setup only.
         }
         /// <summary>Controlled initial B package, including its exit chosen before the first tell.</summary>
         public bool ForceBurrowPlan(string exitPlan)
@@ -190,18 +230,30 @@ namespace FourGuardians.BossFight
         {
             if (!fightActive || player == null || health == null || health.IsDead) return;
             if (player.IsDead) { SetFightActive(false); return; }
-            float dt = Time.fixedDeltaTime; timer += dt; encounterTime += dt; TickRockfall(dt);
-            // Damage callbacks may synchronously end the encounter and clear all hazards.
+            float dt = Time.fixedDeltaTime; timer += dt; encounterTime += dt;
+            if (!ControlsLocked) TickRockfall(dt);
             if (!fightActive || player.IsDead || health.IsDead) return;
-            if (phasePending && State != BossState.Transition) BeginTransition();
+            // A threshold never cancels an advertised attack package or recovery.
+            if (phasePending && (State == BossState.Idle || State == BossState.Waiting)) BeginTransition();
             switch (State)
             {
                 case BossState.Idle:
-                    FacePlayer();
-                    float separation = Mathf.Abs(player.transform.position.x - transform.position.x);
-                    if (separation > 3.6f)
-                        transform.position = new Vector3(ClampBodyX(Mathf.MoveTowards(transform.position.x, player.transform.position.x - Facing * 3.2f, 2.4f * dt)), FloorY, transform.position.z);
-                    if (separation <= 3.6f || timer >= duration) SelectPattern();
+                    SetStage("idle", StateProgress);
+                    if (timer >= duration) SelectPattern();
+                    break;
+                case BossState.Turning:
+                    SetStage("turn", StateProgress);
+                    if (timer >= duration) { Facing = TurnToFacing; SetState(BossState.Settling, settleDuration); SetStage("settle", 0); }
+                    break;
+                case BossState.Reposition:
+                case BossState.Backdash:
+                    SetStage(State == BossState.Backdash ? "backdash" : "reposition", StateProgress);
+                    TickSpacing(dt);
+                    if (timer >= duration) { SetState(BossState.Settling, settleDuration); SetStage("settle", 0); }
+                    break;
+                case BossState.Settling:
+                    SetStage("settle", StateProgress);
+                    if (timer >= duration) SelectPattern();
                     break;
                 case BossState.Telegraph: TickTelegraph(); if (timer >= duration) BeginActive(); break;
                 case BossState.Active:
@@ -214,34 +266,70 @@ namespace FourGuardians.BossFight
                     break;
                 case BossState.Waiting:
                     SetStage("wait", StateProgress);
-                    RepositionWhileWaiting(dt);
                     if (timer >= duration) SelectPattern();
                     break;
                 case BossState.Followup:
                     SetStage("link", StateProgress);
-                    if (timer >= duration) { safetyTellFloor = burrowFollowupTell; BeginCombo(BurrowExitPlan); }
+                    if (timer >= duration) { safetyTellFloor = burrowFollowupTell; preparedPlan = BurrowExitPlan; SelectPattern(); }
                     break;
                 case BossState.Recovery:
                     SetStage("recover", StateProgress);
-                    if (timer >= duration)
-                    {
-                        BurrowPackageActive = false;
-                        if (Mathf.Abs(player.transform.position.x - transform.position.x) > 5.2f && !RockfallActive) SetState(BossState.Idle, 0.70f);
-                        else SelectPattern();
-                    }
+                    if (timer >= duration) { BurrowPackageActive = false; SelectPattern(); }
                     break;
                 case BossState.Transition:
-                    SetStage("transition", StateProgress);
-                    if (StateProgress >= 0.4f) for (int i = 0; i < 4; i++) BreakArmor(i, GetArmorWorldPoint(i));
-                    if (timer >= duration)
-                    {
-                        Phase = 2; phasePending = false;
-                        if (player.FightActive && !player.IsDead) player.Health.DamageEnabled = true;
-                        SelectPattern();
-                    }
+                    TickTransition();
                     break;
             }
             UpdateHurtbox();
+        }
+        private bool PreparePosition()
+        {
+            float dx = player.HurtBounds.center.x - transform.position.x;
+            int desired = Mathf.Abs(dx) > .12f ? (dx > 0 ? 1 : -1) : Facing;
+            if (desired != Facing)
+            {
+                ClearBounds(); HideMarkers(); Pattern=BossPattern.None; TargetLocked=false;
+                TurnFromFacing=Facing; TurnToFacing=desired; TurnCount++;
+                SetState(BossState.Turning,turnDuration); SetStage("turn",0); return false;
+            }
+            float distance=Mathf.Abs(dx);
+            if (distance >= 1.35f && distance <= 3.35f) return true;
+            float side = dx >= 0 ? -1 : 1;
+            float goal = ClampBodyX(player.HurtBounds.center.x + side * 2.55f);
+            // Preserve the current side. A clamped wall target cannot license crossing the player.
+            if ((goal-player.HurtBounds.center.x)*side < .4f) goal=transform.position.x;
+            float available=Mathf.Abs(goal-transform.position.x);
+            if (available < .12f)
+            {
+                if (!RockfallActive && BurrowCooldownRemaining<=0 && !BurrowPackageActive)
+                { BeginSpecial(BossPattern.BBurrowLeap); return false; }
+                return true; // Select only an actually effective footprint below, or wait.
+            }
+            bool retreat=distance<1.35f;
+            bool dash=retreat && BackdashCooldownRemaining<=0 && (distance<.65f || UnityEngine.Random.value<.40f);
+            float step=Mathf.Min(available,dash?1.65f:.95f);
+            spacingDestination=transform.position.x+Mathf.Sign(goal-transform.position.x)*step;
+            Pattern=BossPattern.None; TargetLocked=false; ClearBounds(); HideMarkers();
+            if(dash){nextBackdashTime=encounterTime+backdashCooldown;BackdashCount++;}
+            else RepositionCount++;
+            SetState(dash?BossState.Backdash:BossState.Reposition,step/(dash?backdashSpeed:repositionSpeed));
+            SetStage(dash?"backdash":"reposition",0); return false;
+        }
+        private void TickSpacing(float dt)
+        {
+            float x=transform.position.x, direction=Mathf.Sign(spacingDestination-x);
+            float next=Mathf.MoveTowards(x,spacingDestination,(State==BossState.Backdash?backdashSpeed:repositionSpeed)*dt);
+            float gap=player.HurtBounds.center.x-x;
+            if(gap*direction>0 && Mathf.Abs(gap)<.65f) next=x;
+            transform.position=new Vector3(ClampBodyX(next),FloorY,transform.position.z);
+        }
+        private bool EffectiveBasic(string code)
+        {
+            float minimum=code[0]=='3'?MouthMinimumReach:PawMinimumReach;
+            float maximum=code[0]=='3'?MouthMaximumReach:PawMaximumReach;
+            float center=(player.HurtBounds.center.x-transform.position.x)*Facing;
+            float radius=player.HurtBounds.extents.x;
+            return center>0 && center+radius>=minimum && center-radius<=maximum;
         }
         private float ClampBodyX(float x) => Mathf.Clamp(x, ArenaLeft + 3f, ArenaRight - 3f);
         private void FacePlayer()
@@ -251,46 +339,40 @@ namespace FourGuardians.BossFight
         }
         private void SelectPattern()
         {
-            if (phasePending) { BeginTransition(); return; }
+            if (phasePending) { preparedPlan=null; BeginTransition(); return; }
+            if(Phase==2 && LateRockfallPending && !RockfallActive && !BurrowPackageActive)
+            {LateRockfallPending=false;LateRockfallUsed=true;BeginSpecial(BossPattern.ARockfall);return;}
+            if (!PreparePosition()) return;
             if (RockfallActive && !EscapePreviewAvailable) { WaitForSafePattern("player_action_locked"); return; }
-            FacePlayer(); float distance = Mathf.Abs(player.transform.position.x - transform.position.x);
-            string[] candidates = Phase == 1 ? PhaseOneCombos : PhaseTwoCombos;
-            float[] weights = new float[candidates.Length + 2]; float total = 0f;
-            for (int i = 0; i < candidates.Length; i++)
+            if (!string.IsNullOrEmpty(preparedPlan))
             {
-                string code = candidates[i];
-                float weight = code[0] == '3' ? (distance >= 1.6f && distance <= 4.3f ? 1.5f : 0.60f)
-                    : code[0] == '2' ? (distance < 4.6f ? 1.25f : 0.55f) : (distance > 2.5f ? 1.4f : 0.75f);
-                float frontSpace = Facing > 0 ? ArenaRight - transform.position.x : transform.position.x - ArenaLeft;
-                if (frontSpace < 4.8f && code[0] == '3') weight *= 0.45f;
-                foreach (string prior in recentStarts) if (prior.Length > 0 && prior[0] == code[0]) weight *= 0.48f;
-                if (RockfallActive)
-                {
-                    if (code.Length > 1) weight *= 0.65f;
-                    // Choose the whole chain only when the existing rocks leave a timed escape.
-                    if (!FindTimedEscape(default, false, 0f, code, false)) weight = 0f;
-                }
-                weights[i] = weight; total += weight;
+                string plan=preparedPlan;
+                if (EffectiveBasic(plan) && (!RockfallActive || FindTimedEscape(default,false,0,plan,false)))
+                { preparedPlan=null; BeginCombo(plan); return; }
+                WaitForSafePattern("prepared_followup_not_yet_valid"); return;
             }
-            if (!BurrowPackageActive && !RockfallActive && health.CurrentHealth <= rockfallUnlockHealth && RockfallCooldownRemaining <= 0f && completedSequences >= 2) weights[candidates.Length] = 1.1f;
-            if (!RockfallActive && BurrowCooldownRemaining <= 0f && completedSequences >= 2) weights[candidates.Length + 1] = distance > 4.8f ? 2f : 0.5f;
-            foreach (string prior in recentStarts)
+            string[] candidates=Phase==1?PhaseOneCombos:PhaseTwoCombos;
+            float[] weights=new float[candidates.Length+2]; float total=0;
+            for(int i=0;i<candidates.Length;i++)
             {
-                if (prior == "A") weights[candidates.Length] *= 0.20f;
-                if (prior == "B") weights[candidates.Length + 1] *= 0.20f;
+                string code=candidates[i];
+                float weight=code=="3-2"?(Phase==2?2.5f:1.1f):1.25f;
+                foreach(string prior in recentStarts)if(prior==code)weight*=.55f;
+                if(!EffectiveBasic(code) || RockfallActive && !FindTimedEscape(default,false,0,code,false))weight=0;
+                weights[i]=weight;total+=weight;
             }
-            total += weights[candidates.Length] + weights[candidates.Length + 1];
-            if (total <= 0.0001f)
+            if(string.IsNullOrEmpty(preparedPlan) && !RockfallActive && !BurrowPackageActive && BurrowCooldownRemaining<=0 && completedSequences>=2)
+                weights[candidates.Length]=.40f;
+            if(string.IsNullOrEmpty(preparedPlan) && Phase==2 && !RockfallActive && !BurrowPackageActive && encounterTime>=nextWholeTime)
+                weights[candidates.Length+1]=.65f;
+            total+=weights[candidates.Length]+weights[candidates.Length+1];
+            if(total<.0001f){WaitForSafePattern("no_effective_verified_attack");return;}
+            float draw=UnityEngine.Random.value*total;
+            for(int i=0;i<weights.Length;i++)
             {
-                WaitForSafePattern("no_verified_route"); return;
-            }
-            float draw = UnityEngine.Random.value * total;
-            for (int i = 0; i < weights.Length; i++)
-            {
-                if (weights[i] <= 0f) continue;
-                draw -= weights[i]; if (draw > 0f && i < weights.Length - 1) continue;
-                if (i < candidates.Length) BeginCombo(candidates[i]);
-                else BeginSpecial(i == candidates.Length ? BossPattern.ARockfall : BossPattern.BBurrowLeap);
+                if(weights[i]<=0)continue;
+                draw-=weights[i];if(draw>0 && i<weights.Length-1)continue;
+                if(i<candidates.Length)BeginCombo(candidates[i]);else if(i==candidates.Length)BeginSpecial(BossPattern.BBurrowLeap);else BeginWholeBodyBite();
                 return;
             }
         }
@@ -301,20 +383,7 @@ namespace FourGuardians.BossFight
             // Grounded and hittable, but not advertised as a final combo recovery. Never move a locked player.
             SetState(BossState.Waiting, 0.12f); SetStage("wait", 0f);
         }
-        private void RepositionWhileWaiting(float dt)
-        {
-            // A missing route never licenses an attack. Remain grounded and damageable,
-            // but regain normal spacing rather than becoming a stationary target for
-            // the entire hazard window when consecutive player actions keep it locked.
-            float playerX = player.transform.position.x;
-            if (Mathf.Abs(transform.position.x - playerX) >= 3.2f) return;
-            float away = transform.position.x < playerX ? -1f : 1f;
-            float destination = ClampBodyX(playerX + away * 3.6f);
-            if (Mathf.Abs(destination - playerX) < 3.2f)
-                destination = ClampBodyX(playerX - away * 3.6f);
-            transform.position = new Vector3(Mathf.MoveTowards(transform.position.x, destination, 2.4f * dt), FloorY, transform.position.z);
-            FacePlayer();
-        }
+        private void RepositionWhileWaiting(float dt) { /* Preparation states own movement and cannot cross the player. */ }
         private void RememberStart(string code) { recentStarts.Enqueue(code); while (recentStarts.Count > 3) recentStarts.Dequeue(); }
         private void ClearCombo() { combo = Array.Empty<BossPattern>(); ComboCode = ""; ComboIndex = 0; }
         private void BeginCombo(string code)
@@ -322,8 +391,8 @@ namespace FourGuardians.BossFight
             // Entire chain is selected before its first tell. Inputs never create or cancel followups.
             ComboCode = code; ComboIndex = 0;
             string[] steps = code.Split('-'); combo = new BossPattern[steps.Length];
-            for (int i = 0; i < steps.Length; i++) combo[i] = steps[i] == "3" ? BossPattern.DT03Bite : steps[i] == "2" ? BossPattern.DT02Sweep : BossPattern.DT01Slam;
-            FacePlayer(); RememberStart(code); BeginBasic(combo[0]);
+            for (int i = 0; i < steps.Length; i++) combo[i] = steps[i] == "3" ? BossPattern.DT03Bite : BossPattern.DT02Sweep;
+            RememberStart(code); BeginBasic(combo[0]);
         }
         private void BeginBasic(BossPattern pattern)
         {
@@ -337,28 +406,20 @@ namespace FourGuardians.BossFight
             }
             else if (pattern == BossPattern.DT02Sweep)
             {
-                // The selected 3->2 chain commits to a visible forward step, never to late player tracking.
+                // This preselected chain uses the same fixed root; no late player tracking.
                 if (IsComboFollowup) motionEndX = ClampBodyX(transform.position.x + Facing * sweepComboAdvance);
-                TargetX = motionEndX + Facing * 2.3f;
-                WarningBounds = Box(TargetX, FloorY + 0.30f, 3.8f, 0.60f);
+                TargetX = motionEndX + Facing * ((PawMinimumReach + PawMaximumReach)*.5f);
+                WarningBounds = Box(TargetX, FloorY + 0.30f, PawMaximumReach-PawMinimumReach, 0.60f);
                 tell = IsComboFollowup ? sweepFollowupTell : sweepTell;
             }
-            else
-            {
-                motionEndX = ClampBodyX(transform.position.x + Facing * slamAdvance);
-                TargetX = motionEndX + Facing * 3.4f;
-                WarningBounds = Box(TargetX, FloorY + 0.8f, 2.8f, 1.6f);
-                float innerExit = motionEndX + Facing * (2f - player.HurtBounds.extents.x - 0.10f);
-                float distanceInside = Mathf.Max(0f, (player.transform.position.x - innerExit) * Facing);
-                tell = Mathf.Max(slamTell, reactionMargin + distanceInside / Mathf.Max(1f, player.Movement.MoveSpeed));
-            }
+            else { throw new InvalidOperationException("Retired or non-basic pattern cannot begin a basic attack."); }
             tell = Mathf.Max(tell, safetyTellFloor); safetyTellFloor = 0f;
             LockedTellDuration = tell; SetState(BossState.Telegraph, tell); SetStage("tell", 0f);
             ShowWarning(); Cue("telegraph", new Vector2(TargetX, FloorY), tell); UpdateHurtbox();
         }
         private void BeginSpecial(BossPattern pattern, string burrowExit = null)
         {
-            ClearCombo(); FacePlayer(); HideMarkers(); ClearBounds();
+            ClearCombo(); HideMarkers(); ClearBounds();
             transform.position = new Vector3(ClampBodyX(transform.position.x), FloorY, transform.position.z);
             Pattern = pattern; AttackId = ++nextAttackId; riseOrigin = transform.position;
             TargetLocked = false; LockedTellDuration = 0f; landed = false;
@@ -373,7 +434,11 @@ namespace FourGuardians.BossFight
                 string[] valid = Phase == 1 ? PhaseOneCombos : PhaseTwoCombos;
                 BurrowExitPlan = burrowExit ?? (UnityEngine.Random.value < 0.45f ? "rest" : valid[UnityEngine.Random.Range(0, valid.Length)]);
                 BurrowPackageActive = true;
-                TargetX = ClampBodyX(player.transform.position.x); nextBurrowTime = encounterTime + burrowCooldown;
+                float frontSpace=Facing>0?ArenaRight-transform.position.x:transform.position.x-ArenaLeft;
+                bool wallReset=Mathf.Abs(transform.position.x)>5.4f && (frontSpace<3.4f || Mathf.Abs(player.transform.position.x-transform.position.x)<1.35f);
+                TargetX=wallReset?ClampBodyX(transform.position.x*.52f):ClampBodyX(player.HurtBounds.center.x);
+                emergenceX=ClampBodyX(TargetX-Facing*3f);nextBurrowTime=encounterTime+burrowCooldown;
+                LockLeapLanding();
                 SetState(BossState.Telegraph, submergeDuration + travelDuration + riseDuration);
                 SetStage("submerge", 0f); Cue("submerge", transform.position, submergeDuration);
             }
@@ -382,10 +447,11 @@ namespace FourGuardians.BossFight
         private void TickTelegraph()
         {
             if (Pattern == BossPattern.ARockfall) { SetStage("breathe", StateProgress); return; }
+            if(Pattern==BossPattern.WholeBodyBite){SetStage("whole_tell",StateProgress);AnimateWarning();return;}
             if (Pattern != BossPattern.BBurrowLeap)
             {
                 SetStage("tell", StateProgress);
-                if (Pattern == BossPattern.DT01Slam || (Pattern == BossPattern.DT02Sweep && IsComboFollowup))
+                if (Pattern == BossPattern.DT02Sweep && IsComboFollowup)
                     transform.position = new Vector3(Mathf.Lerp(riseOrigin.x, motionEndX, Mathf.SmoothStep(0f, 1f, StateProgress)), FloorY, riseOrigin.z);
                 AnimateWarning(); return;
             }
@@ -398,14 +464,12 @@ namespace FourGuardians.BossFight
             {
                 if (AttackStage != "travel") Cue("travel", new Vector2(transform.position.x, FloorY), travelDuration);
                 SetStage("travel", (timer - submergeDuration) / travelDuration);
-                TargetX = ClampBodyX(player.transform.position.x);
-                float proposedEmergence = ClampBodyX(TargetX - Facing * 3f);
-                transform.position = new Vector3(Mathf.Lerp(riseOrigin.x, proposedEmergence, AttackStageProgress), FloorY - 4.7f, riseOrigin.z);
+                transform.position = new Vector3(Mathf.Lerp(riseOrigin.x, emergenceX, AttackStageProgress), FloorY - 4.7f, riseOrigin.z);
                 DrawBurrowTrace();
             }
             else
             {
-                if (!TargetLocked) LockLeapLanding();
+                if (AttackStage!="rise")Cue("rise",new Vector2(emergenceX,FloorY),riseDuration);
                 SetStage("rise", (timer - submergeDuration - travelDuration) / riseDuration);
                 float y = Mathf.Lerp(-4.7f, leapHeight, Mathf.SmoothStep(0f, 1f, AttackStageProgress));
                 transform.position = new Vector3(emergenceX, FloorY + y, riseOrigin.z);
@@ -414,47 +478,83 @@ namespace FourGuardians.BossFight
         }
         private void LockLeapLanding()
         {
-            // Final target sample precedes the visible eruption and the entire forward flight.
-            TargetX = ClampBodyX(player.transform.position.x);
-            float leftRoom = TargetX - (ArenaLeft + 3f), rightRoom = ArenaRight - 3f - TargetX;
-            if (Facing > 0 && leftRoom < 2f) Facing = -1;
-            else if (Facing < 0 && rightRoom < 2f) Facing = 1;
-            emergenceX = ClampBodyX(TargetX - Facing * 3f);
-            WarningBounds = Box(TargetX, FloorY + 0.7f, landingWidth, 1.4f);
-            TargetLocked = true;
-            float radius = Mathf.Max(0.35f, player.HurtBounds.extents.x);
-            float leftExit = WarningBounds.min.x - radius - 0.1f, rightExit = WarningBounds.max.x + radius + 0.1f;
-            float escape = float.PositiveInfinity, px = player.transform.position.x;
-            if (leftExit >= ArenaLeft + radius) escape = Mathf.Min(escape, Mathf.Max(0f, px - leftExit));
-            if (rightExit <= ArenaRight - radius) escape = Mathf.Min(escape, Mathf.Max(0f, rightExit - px));
-            if (px + radius <= WarningBounds.min.x || px - radius >= WarningBounds.max.x) escape = 0f;
-            float required = reactionMargin + escape / Mathf.Max(1f, player.Movement.MoveSpeed);
-            LockedTellDuration = Mathf.Max(riseDuration + flightDuration, required);
-            leapFlightTime = LockedTellDuration - riseDuration;
-            ShowWarning(); Cue("rise", new Vector2(emergenceX, FloorY), riseDuration);
+            // The landing and facing are fixed before the very first submerge warning.
+            WarningBounds=Box(TargetX,FloorY+.7f,landingWidth,1.4f);TargetLocked=true;
+            float radius=Mathf.Max(.35f,player.HurtBounds.extents.x),px=player.HurtBounds.center.x;
+            float left=WarningBounds.min.x-radius-.1f,right=WarningBounds.max.x+radius+.1f,escape=float.PositiveInfinity;
+            if(left>=ArenaLeft+radius)escape=Mathf.Min(escape,Mathf.Max(0,px-left));
+            if(right<=ArenaRight-radius)escape=Mathf.Min(escape,Mathf.Max(0,right-px));
+            if(px+radius<=WarningBounds.min.x || px-radius>=WarningBounds.max.x)escape=0;
+            float required=reactionMargin+escape/Mathf.Max(1,player.Movement.MoveSpeed);
+            leapFlightTime=Mathf.Max(flightDuration,required-submergeDuration-travelDuration-riseDuration);
+            LockedTellDuration=submergeDuration+travelDuration+riseDuration+leapFlightTime;ShowWarning();
+        }
+        private void BeginWholeBodyBite()
+        {
+            ClearCombo();HideMarkers();ClearBounds();Pattern=BossPattern.WholeBodyBite;AttackId=++nextAttackId;
+            WholeFirstSide=WholeSwingSide=Facing;WholeBodyAttackCount++;wholeSecondIdAllocated=false;
+            wholeFirstBounds=WholeBounds(Facing);wholeSecondBounds=WholeBounds(-Facing);
+            WarningBounds=wholeFirstBounds;SecondaryWarningBounds=wholeSecondBounds;TargetX=wholeFirstBounds.center.x;TargetLocked=true;
+            nextWholeTime=encounterTime+wholeCooldown;LockedTellDuration=wholeTell;
+            SetState(BossState.Telegraph,wholeTell);SetStage("whole_tell",0);ShowWarning();
+            DrawRect(wholeSecondWarning,new Vector3(wholeSecondBounds.center.x,FloorY+.06f,0),new Vector3(wholeSecondBounds.size.x,.045f,1),new Color(.94f,.55f,.24f,.45f));
+            Cue("telegraph",new Vector2(TargetX,FloorY),wholeTell);
+        }
+        private Bounds WholeBounds(int side)
+        {
+            float center=transform.position.x+side*2.85f;
+            float left=Mathf.Max(ArenaLeft,center-1.65f),right=Mathf.Min(ArenaRight,center+1.65f);
+            return Box((left+right)*.5f,FloorY+.6f,right-left,1.2f);
+        }
+        private void TickWholeBodyBite()
+        {
+            float firstEnd=wholeArc+wholeContact,secondStart=firstEnd+wholeBridge;
+            if(timer<firstEnd)
+            {
+                WholeSwingSide=WholeFirstSide;
+                if(timer<wholeArc){SetStage("whole_arc",timer/wholeArc);AnimateWarning();return;}
+                if(AttackStage!="whole_hit")Cue("whole_bite",new Vector2(wholeFirstBounds.center.x,FloorY),1);
+                SetStage("whole_hit",(timer-wholeArc)/wholeContact);ActiveBounds=wholeFirstBounds;
+            }
+            else if(timer<secondStart)
+            {
+                if(!wholeSecondIdAllocated)
+                {wholeSecondIdAllocated=true;AttackId=++nextAttackId;HideMarkers();WarningBounds=wholeSecondBounds;TargetX=wholeSecondBounds.center.x;ShowWarning();Cue("whole_shift",new Vector2(TargetX,FloorY),wholeBridge);}
+                WholeSwingSide=-WholeFirstSide;SetStage("whole_cross",(timer-firstEnd)/wholeBridge);AnimateWarning();return;
+            }
+            else
+            {
+                WholeSwingSide=-WholeFirstSide;float secondTime=timer-secondStart;
+                if(secondTime<wholeArc){SetStage("whole_arc",secondTime/wholeArc);AnimateWarning();return;}
+                if(AttackStage!="whole_hit")Cue("whole_bite",new Vector2(wholeSecondBounds.center.x,FloorY),1);
+                SetStage("whole_hit",(secondTime-wholeArc)/wholeContact);ActiveBounds=wholeSecondBounds;
+            }
+            DrawAttackEffect(ActiveBounds);DamageVolume(ActiveBounds,AttackId);
         }
         private void BeginActive()
         {
             if (Pattern == BossPattern.ARockfall)
             {
                 SetState(BossState.Active, roarDuration); SetStage("roar", 0f);
-                rockfallEnd = encounterTime + rockfallDuration; nextRockTime = encounterTime;
                 Cue("roar", transform.position, roarDuration); return;
             }
+            if(Pattern==BossPattern.WholeBodyBite)
+            {SetState(BossState.Active,2*(wholeArc+wholeContact)+wholeBridge);SetStage("whole_arc",0);return;}
             if (Pattern == BossPattern.BBurrowLeap)
             {
                 if (!TargetLocked) LockLeapLanding();
-                SetState(BossState.Active, leapFlightTime + landingDuration + (Phase == 2 ? waveDelay + waveDuration : 0f));
+                SetState(BossState.Active, leapFlightTime + landingDuration + waveDelay + waveDuration);
                 SetStage("flight", 0f); Cue("flight", new Vector2(TargetX, FloorY), leapFlightTime); return;
             }
-            SetState(BossState.Active, Pattern == BossPattern.DT01Slam ? slamStrike : Pattern == BossPattern.DT02Sweep ? sweepStrike : biteStrike);
+            SetState(BossState.Active, Pattern == BossPattern.DT02Sweep ? sweepStrike : biteStrike);
             SetStage("strike", 0f); Cue("release", new Vector2(TargetX, FloorY), 1f);
-            Cue(Pattern == BossPattern.DT01Slam ? "impact" : Pattern == BossPattern.DT02Sweep ? "sweep" : "bite", new Vector2(TargetX, FloorY), 0.5f);
+            Cue(Pattern == BossPattern.DT02Sweep ? "sweep" : "bite", new Vector2(TargetX, FloorY), 0.5f);
         }
         private void TickAttack()
         {
             ActiveBounds = SecondaryActiveBounds = default;
             if (Pattern == BossPattern.ARockfall) { SetStage("roar", StateProgress); return; }
+            if(Pattern==BossPattern.WholeBodyBite){TickWholeBodyBite();return;}
             if (Pattern != BossPattern.BBurrowLeap)
             {
                 SetStage("strike", StateProgress); ActiveBounds = WarningBounds;
@@ -475,7 +575,6 @@ namespace FourGuardians.BossFight
                 ActiveBounds = Box(TargetX, FloorY + 0.7f, landingWidth, 1.4f);
                 DrawAttackEffect(ActiveBounds); DamageVolume(ActiveBounds, AttackId); return;
             }
-            if (Phase != 2) return;
             if (elapsed < landingDuration + waveDelay)
             {
                 if (AttackStage != "wave_delay")
@@ -516,7 +615,8 @@ namespace FourGuardians.BossFight
             LastCompletedAttackId = AttackId;
             transform.position = new Vector3(transform.position.x, FloorY, transform.position.z);
             HideMarkers(); ClearBounds();
-            if (Pattern == BossPattern.ARockfall) { completedSequences++; SelectPattern(); return; }
+            if (Pattern == BossPattern.ARockfall) { completedSequences++;StartRockfallWindow();SetState(BossState.Idle,.35f);return; }
+            if(Pattern==BossPattern.WholeBodyBite)Facing=-WholeFirstSide;
             if (Pattern == BossPattern.BBurrowLeap && BurrowExitPlan != "rest")
             {
                 completedSequences++;
@@ -531,7 +631,7 @@ namespace FourGuardians.BossFight
             }
             completedSequences++;
             if (Pattern == BossPattern.BBurrowLeap) BurrowPackageActive = false;
-            float recovery = Pattern == BossPattern.BBurrowLeap ? leapRecovery : Pattern == BossPattern.DT01Slam ? slamRecovery : Pattern == BossPattern.DT02Sweep ? sweepRecovery : biteRecovery;
+            float recovery = Pattern == BossPattern.BBurrowLeap ? leapRecovery : Pattern == BossPattern.WholeBodyBite ? wholeRecovery : Pattern == BossPattern.DT02Sweep ? sweepRecovery : biteRecovery;
             SetState(BossState.Recovery, recovery); Cue("recover", transform.position, recovery);
         }
         private void TickRockfall(float dt)
@@ -650,7 +750,7 @@ namespace FourGuardians.BossFight
                 string[] steps = plannedCode.Split('-');
                 for (int i = 0; i < steps.Length; i++)
                 {
-                    BossPattern step = steps[i] == "3" ? BossPattern.DT03Bite : steps[i] == "2" ? BossPattern.DT02Sweep : BossPattern.DT01Slam;
+                    BossPattern step = steps[i] == "3" ? BossPattern.DT03Bite : BossPattern.DT02Sweep;
                     AddFutureDanger(step, i > 0, ref forecastX, ref cursor);
                 }
             }
@@ -660,7 +760,7 @@ namespace FourGuardians.BossFight
                 if (State == BossState.Link) { cursor = Mathf.Max(0f, duration - timer); }
                 else
                 {
-                    float strike = Pattern == BossPattern.DT01Slam ? slamStrike : Pattern == BossPattern.DT02Sweep ? sweepStrike : biteStrike;
+                    float strike = Pattern == BossPattern.DT02Sweep ? sweepStrike : biteStrike;
                     float start = State == BossState.Telegraph ? Mathf.Max(0f, duration - timer) : 0f;
                     float end = State == BossState.Telegraph ? start + strike : Mathf.Max(0f, duration - timer);
                     routeDangers.Add(new TimedDanger { bounds = WarningBounds, start = start, end = end, sweep = Pattern == BossPattern.DT02Sweep, basic = true });
@@ -686,7 +786,11 @@ namespace FourGuardians.BossFight
             float speed = player.Movement.MoveSpeed;
             float inputDelay = reactionMargin;
             jumpAt = Mathf.Max(jumpAt, inputDelay);
-            float radius = Mathf.Max(0.35f, player.HurtBounds.extents.x) + 0.04f;
+            // A command submitted in rendered Update reaches movement on a later
+            // fixed tick. Keep the safety proof clear of the footprint by that
+            // travel distance as well; this never enlarges actual damage bounds.
+            float commandTravel = speed * (2f * Time.fixedDeltaTime + 1f / 30f);
+            float radius = Mathf.Max(0.35f, player.HurtBounds.extents.x) + 0.04f + commandTravel;
             float initialX = player.HurtBounds.center.x;
             // A physical wall may lie just outside the scheduling arena. Never snap a wall-side
             // player inward in the preview; that would invent free escape distance.
@@ -712,10 +816,6 @@ namespace FourGuardians.BossFight
                         if (strategy >= 5)
                         {
                             float target = transform.position.x + Facing * (strategy == 5 ? 5.0f : -0.9f);
-                            // Once the slow slam's tell begins, the inside route becomes available.
-                            foreach (TimedDanger danger in routeDangers)
-                                if (danger.bounds.size.y > 1.5f && danger.bounds.size.x > 2.7f && danger.start > t && danger.start - t <= slamTell)
-                                    target = transform.position.x - Facing * 0.9f;
                             direction = Mathf.Abs(target - x) < speed * dt ? 0f : Mathf.Sign(target - x);
                         }
                         x = Mathf.Clamp(x + direction * speed * dt, routeLeft, routeRight);
@@ -753,39 +853,15 @@ namespace FourGuardians.BossFight
                 or WarriorAction.JumpAttack or WarriorAction.DashAttack or WarriorAction.Dash
                 or WarriorAction.Hurt or WarriorAction.Slide or WarriorAction.EdgeGrab or WarriorAction.EdgeIdle;
         }
-        private void AddFutureDanger(BossPattern step, bool followup, ref float originX, ref float cursor)
+        private void AddFutureDanger(BossPattern step,bool followup,ref float originX,ref float cursor)
         {
-            float tell, strike; Bounds bounds;
-            if (step == BossPattern.DT03Bite)
-            {
-                bounds = Box(originX + Facing * 2.2f, FloorY + 0.9f, 2.6f, 1.8f); tell = biteTell; strike = biteStrike;
-            }
-            else if (step == BossPattern.DT02Sweep)
-            {
-                if (followup) originX = ClampBodyX(originX + Facing * sweepComboAdvance);
-                bounds = Box(originX + Facing * 2.3f, FloorY + 0.3f, 3.8f, 0.6f);
-                tell = followup ? sweepFollowupTell : sweepTell; strike = sweepStrike;
-            }
-            else
-            {
-                originX = ClampBodyX(originX + Facing * slamAdvance);
-                bounds = Box(originX + Facing * 3.4f, FloorY + 0.8f, 2.8f, 1.6f);
-                float inner = originX + Facing * (2f - player.HurtBounds.extents.x - 0.10f);
-                tell = Mathf.Max(slamTell, reactionMargin + Mathf.Max(0f, (player.transform.position.x - inner) * Facing) / Mathf.Max(1f, player.Movement.MoveSpeed));
-                strike = slamStrike;
-            }
-            float earliestTell = tell, latestTell = tell;
-            if (step == BossPattern.DT01Slam && followup)
-            {
-                // A later slam may adapt its tell to the player's then-current distance. Cover
-                // that entire timing interval rather than trusting today's player position.
-                earliestTell = slamTell;
-                float inner = originX + Facing * (2f - player.HurtBounds.extents.x - 0.10f);
-                float farthest = Facing > 0 ? ArenaRight - inner : inner - ArenaLeft;
-                latestTell = Mathf.Max(slamTell, reactionMargin + Mathf.Max(0f, farthest) / Mathf.Max(1f, player.Movement.MoveSpeed));
-            }
-            routeDangers.Add(new TimedDanger { bounds = bounds, start = cursor + earliestTell, end = cursor + latestTell + strike, sweep = step == BossPattern.DT02Sweep, basic = true });
-            cursor += tell + strike + comboLink;
+            bool sweep=step==BossPattern.DT02Sweep;
+            if(sweep && followup)originX=ClampBodyX(originX+Facing*sweepComboAdvance);
+            Bounds bounds=sweep?Box(originX+Facing*((PawMinimumReach+PawMaximumReach)*.5f),FloorY+.3f,PawMaximumReach-PawMinimumReach,.6f)
+                :Box(originX+Facing*2.2f,FloorY+.9f,2.6f,1.8f);
+            float tell=sweep?(followup?sweepFollowupTell:sweepTell):biteTell,strike=sweep?sweepStrike:biteStrike;
+            routeDangers.Add(new TimedDanger{bounds=bounds,start=cursor+tell,end=cursor+tell+strike,sweep=sweep,basic=true});
+            cursor+=tell+strike+comboLink;
         }
         private void ClearRockfall()
         {
@@ -794,13 +870,34 @@ namespace FourGuardians.BossFight
         }
         private void BeginTransition()
         {
-            BurrowPackageActive = false;
-            ClearRockfall(); HideMarkers(); ClearBounds(); ClearCombo(); TargetLocked = false;
-            transform.position = new Vector3(ClampBodyX(transform.position.x), FloorY, transform.position.z);
-            Pattern = BossPattern.None; SetState(BossState.Transition, 2.4f); health.DamageEnabled = false;
-            if (player != null && player.Health != null) player.Health.DamageEnabled = false;
-            if (hurtCollider != null) hurtCollider.enabled = false;
-            Cue("phase", transform.position, 2.4f);
+            BurrowPackageActive=false;preparedPlan=null;ClearRockfall();HideMarkers();ClearBounds();ClearCombo();TargetLocked=false;
+            transform.position=new Vector3(ClampBodyX(transform.position.x),FloorY,transform.position.z);
+            Pattern=BossPattern.None;SetState(BossState.Transition,1.70f);SetStage("armor_drop",0);health.DamageEnabled=false;
+            if(player!=null && player.Health!=null)player.Health.DamageEnabled=false;
+            if(hurtCollider!=null)hurtCollider.enabled=false;
+            for(int i=0;i<4;i++)BreakArmor(i,GetArmorWorldPoint(i));
+            Cue("phase",transform.position,.7f);
+        }
+        private void TickTransition()
+        {
+            if(timer<.12f)SetStage("armor_drop",timer/.12f);
+            else if(timer<.80f)SetStage("groggy",(timer-.12f)/.68f);
+            else
+            {
+                if(AttackStage!="phase_roar")Cue("phase_roar",transform.position,.90f);
+                SetStage("phase_roar",(timer-.80f)/.90f);
+            }
+            if(timer>=duration)
+            {
+                Phase=2;phasePending=false;EntryRockfallUsed=true;StartRockfallWindow();
+                SetState(BossState.Idle,.40f);SetStage("idle",0);
+            }
+        }
+        private void StartRockfallWindow()
+        {
+            RockfallEventCount++;rockfallEnd=encounterTime+rockfallDuration;
+            // Player control returns first, then a .40s grace plus each rock's >=.95s fixed warning.
+            nextRockTime=encounterTime+.40f;Cue("rockfall_start",transform.position,rockfallDuration);
         }
         public Vector2 GetArmorWorldPoint(int index)
         {
@@ -826,8 +923,9 @@ namespace FourGuardians.BossFight
             if (Phase == 1 && health.CurrentHealth <= 20 && !health.IsDead)
             {
                 BreakArmor(2, GetArmorWorldPoint(2)); phasePending = true;
-                if (State != BossState.Transition) BeginTransition();
+                // Deferred until the complete current attack and promised recovery have finished.
             }
+            if(Phase==2 && health.CurrentHealth<=lateRockfallHealth && !health.IsDead && !LateRockfallUsed) LateRockfallPending=true;
         }
         private void BreakArmor(int index, Vector2 point)
         {
@@ -840,10 +938,10 @@ namespace FourGuardians.BossFight
             AttackStage = next == BossState.Recovery ? "recover" : next.ToString().ToLowerInvariant(); AttackStageProgress = 0f;
         }
         private void SetStage(string stage, float progress) { AttackStage = stage; AttackStageProgress = Mathf.Clamp01(progress); }
-        private void ClearBounds() { WarningBounds = ActiveBounds = SecondaryActiveBounds = default; }
+        private void ClearBounds() { WarningBounds = ActiveBounds = SecondaryActiveBounds = SecondaryWarningBounds = default; }
         private void OnDied()
         {
-            fightActive = false; ClearRockfall(); SetState(BossState.Dead, 0f); HideMarkers(); ClearBounds(); UpdateHurtbox(); Cue("death", transform.position, 1f);
+            LateRockfallPending=false;preparedPlan=null;fightActive = false; ClearRockfall(); SetState(BossState.Dead, 0f); HideMarkers(); ClearBounds(); UpdateHurtbox(); Cue("death", transform.position, 1f);
         }
         private void UpdateHurtbox()
         {
@@ -878,6 +976,7 @@ namespace FourGuardians.BossFight
             markers = new GameObject("DoCheol_AttackMarkers");
 
             warningLine = NewSprite("DangerFloorLine", markers.transform, 8);
+            wholeSecondWarning=NewSprite("WholeSecondGroundWarning",markers.transform,8);
             attackFill = NewSprite("RootCrest", markers.transform, 15);
             if (rootWaveSprite == null) rootWaveSprite = CreateRootSprite();
             if (dustSprite == null) dustSprite = CreateDustSprite();
@@ -1038,6 +1137,7 @@ namespace FourGuardians.BossFight
         {
 
             if (warningLine != null) warningLine.enabled = false;
+            if(wholeSecondWarning!=null)wholeSecondWarning.enabled=false;
             if (attackFill != null) attackFill.enabled = false;
             if (weakPoint != null) weakPoint.enabled = false;
             for (int i = 0; i < rangeTicks.Length; i++) if (rangeTicks[i] != null) rangeTicks[i].enabled = false;

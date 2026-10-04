@@ -63,7 +63,7 @@ namespace FourGuardians.BossFight
                 if (args[i] == "-bossqa" && i + 1 < args.Length)
                 {
                     IsQaContracts = args[i + 1] == "contracts" || args[i + 1] == "v3contracts";
-                    qaIntro = args[i + 1] == "intro" || args[i + 1] == "v3intro" || args[i + 1] == "observe";
+                    qaIntro = args[i + 1] == "intro" || args[i + 1] == "v3intro" || args[i + 1] == "observe" || args[i + 1] == "v4observe";
                 }
                 if (args[i] == "-bossqa-fps" && i + 1 < args.Length && int.TryParse(args[i + 1], out int fps))
                     Application.targetFrameRate = Mathf.Clamp(fps, 15, 240);
@@ -166,7 +166,9 @@ namespace FourGuardians.BossFight
             if (State == EncounterState.Fighting)
             {
                 elapsed += Time.deltaTime;
-                player.Health.DamageEnabled = !player.IsDead && boss.State != BossState.Transition;
+                bool canControl=!player.IsDead && !boss.ControlsLocked;
+                if(player.FightActive!=canControl)player.SetFightActive(canControl);
+                player.Health.DamageEnabled=canControl;
             }
             if (State != EncounterState.Paused && hitStopUntil > 0f && Time.unscaledTime >= hitStopUntil)
             {
@@ -184,6 +186,8 @@ namespace FourGuardians.BossFight
 
             if (bossVisual != null)
             {
+                bossVisual.SetWholeBodyState(boss.WholeFirstSide,boss.WholeSwingSide);
+                bossVisual.SetTurnState(boss.Turning,boss.StateProgress,boss.TurnFromFacing,boss.TurnToFacing);
                 bossVisual.SetCombatState(boss.Phase, boss.ArmorMask, boss.AttackStage, boss.AttackStageProgress,
                     boss.TransitionProgress, boss.IsUnderground, boss.TargetLocked);
                 bossVisual.SetAttackGeometry(boss.WarningBounds, boss.ActiveBounds, boss.FloorY);
@@ -218,6 +222,7 @@ namespace FourGuardians.BossFight
                 BossPattern.DT06Burrow => "DT06",
                 BossPattern.ARockfall => "ARockfall",
                 BossPattern.BBurrowLeap => "BBurrowLeap",
+                BossPattern.WholeBodyBite => "WholeBodyBite",
                 _ => "MV01"
             };
         }

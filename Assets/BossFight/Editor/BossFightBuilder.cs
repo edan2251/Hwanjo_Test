@@ -14,7 +14,7 @@ namespace FourGuardians.BossFight.Editor
 {
     public static class BossFightBuilder
     {
-        public const string ScenePath = "Assets/BossFight/Scenes/DocheolArena.unity";
+        public const string ScenePath = "Assets/BossFight/Scenes/DocheolArenaV4.unity";
         private const string Generated = "Assets/BossFight/Generated";
         private static string WorkRoot => Path.GetFullPath(Path.Combine(Application.dataPath,"..",".."));
 
@@ -51,6 +51,11 @@ namespace FourGuardians.BossFight.Editor
                 sr.sharedMaterial=spriteMaterial;
                 sr.sortingOrder=20;
             }
+            // The copied course dust otherwise keeps its built-in particle material,
+            // which renders magenta in this URP player. Reuse the existing compatible
+            // material on this arena copy without editing the original player or FX.
+            foreach(ParticleSystemRenderer particles in playerObject.GetComponentsInChildren<ParticleSystemRenderer>(true))
+                particles.sharedMaterial=spriteMaterial;
             var body=playerObject.GetComponent<Rigidbody2D>();
             body.interpolation=RigidbodyInterpolation2D.Interpolate;
             var player=playerObject.GetComponent<BossFightPlayerAdapter>();
@@ -115,7 +120,7 @@ namespace FourGuardians.BossFight.Editor
             EditorBuildSettings.scenes=new[]{new EditorBuildSettingsScene(ScenePath,true)};
             EditorSceneManager.playModeStartScene=AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath);
             PlayerSettings.companyName="Hwanjo";
-            PlayerSettings.productName="Hwanjo - Docheol V3 / Broken Rhythm";
+            PlayerSettings.productName="Hwanjo - Docheol V4 / Root and Reach";
             PlayerSettings.defaultScreenWidth=1280;
             PlayerSettings.defaultScreenHeight=720;
             PlayerSettings.fullScreenMode=FullScreenMode.Windowed;
@@ -123,7 +128,7 @@ namespace FourGuardians.BossFight.Editor
             PlayerSettings.runInBackground=true;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Standalone,ScriptingImplementation.Mono2x);
             AssetDatabase.SaveAssets();
-            Debug.Log("[Docheol] V3 scene built with original warrior and reused V2 artwork: " + ScenePath);
+            Debug.Log("[Docheol] V4 scene built with original warrior and reused V2 artwork: " + ScenePath);
         }
 
         [Serializable] private sealed class ArtContract { public ArtPart[] parts; }
@@ -188,13 +193,13 @@ namespace FourGuardians.BossFight.Editor
             try
             {
                 BuildScene();
-                string destination=Path.Combine(WorkRoot,"Deliverables","Hwanjo_Docheol_V3","Hwanjo_Docheol_V3.exe");
+                string destination=Path.Combine(WorkRoot,"Deliverables","Hwanjo_Docheol_V4","Hwanjo_Docheol_V4.exe");
                 Directory.CreateDirectory(Path.GetDirectoryName(destination));
                 var options=new BuildPlayerOptions{ scenes=new[]{ScenePath},locationPathName=destination,
                     target=BuildTarget.StandaloneWindows64,options=BuildOptions.None };
                 BuildReport report=BuildPipeline.BuildPlayer(options);
-                Directory.CreateDirectory(Path.Combine(WorkRoot,"QA","V3"));
-                File.WriteAllText(Path.Combine(WorkRoot,"QA","V3","build-summary.json"),
+                Directory.CreateDirectory(Path.Combine(WorkRoot,"QA","V4"));
+                File.WriteAllText(Path.Combine(WorkRoot,"QA","V4","build-summary.json"),
                     JsonUtility.ToJson(new BuildEvidence { result=report.summary.result.ToString(), errors=report.summary.totalErrors,
                     warnings=report.summary.totalWarnings,bytes=report.summary.totalSize,path=destination,
                     unity=Application.unityVersion,utc=DateTime.UtcNow.ToString("o") },true));

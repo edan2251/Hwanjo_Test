@@ -87,44 +87,24 @@ namespace FourGuardians.BossFight
         }
         private void DrawPatternHint()
         {
-            var boss=session.Boss;
-            if(boss==null)return;
-            if(boss.RockfallActive)
-                GUI.Label(new Rect(365,120,550,26),"낙석 중  ·  위와 바닥의 그림자를 함께 보세요",smallCenter);
-            string text="";
-            Color accent=new Color(.95f,.65f,.29f);
-            if(boss.State==BossState.Followup)
-                text="착지 뒤에도 이어진다  ·  다음 자세를 보세요";
-            else if(boss.State==BossState.Link)
-                text="동작이 이어진다  ·  다음 자세를 보세요";
+            var boss=session.Boss;if(boss==null)return;
+            if(boss.RockfallActive)GUI.Label(new Rect(365,120,550,26),"낙석 중 · 앞발과 바닥의 그림자를 함께 살피세요",smallCenter);
+            string text="";Color accent=new Color(.95f,.65f,.29f);
+            if(boss.ControlsLocked)text=boss.AttackStage=="phase_roar"?"속박을 끊는 울부짖음":"갑주가 무너진다 · 잠시 숨을 고른다";
+            else if(boss.Turning)text="머리를 거두어 방향을 바꾼다";
+            else if(boss.State==BossState.Backdash || boss.State==BossState.Reposition)text="자리를 다시 잡는다";
+            else if(boss.State==BossState.Followup || boss.State==BossState.Link)text="다음 동작이 이어진다 · 낮은 자세를 살피세요";
             else if(boss.State==BossState.Telegraph || boss.State==BossState.Active)
-            {
                 text=boss.Pattern switch {
-                    BossPattern.DT01Slam => "높이 든 앞발  ·  턱 아래로 파고들기",
-                    BossPattern.DT02Sweep => boss.IsComboFollowup ? "뻗어오는 앞발  ·  점프로 넘으세요" : "낮게 휘두르는 앞발  ·  점프 또는 바깥으로 거리 회피",
-                    BossPattern.DT03Bite => "벌어지는 입  ·  물기 범위에서 벗어나기",
-                    BossPattern.ARockfall => boss.AttackStage=="breathe"?"포효를 준비한다  ·  천장을 살피세요":"낙석이 시작된다  ·  공격할 순간을 찾으세요",
-                    BossPattern.BBurrowLeap => boss.AttackStage=="wave_delay" || boss.AttackStage=="wave"
-                        ? "착지 뒤 낮은 충격파  ·  뛰어넘기"
-                        : boss.TargetLocked ? "착지 위치 고정  ·  표식 밖으로 이동" : "땅속을 따라 움직인다  ·  착지 표식에 주의",
-                    _ => ""
-                };
-            }
-            else if(boss.State==BossState.Recovery)
-            {
-                text=boss.Pattern==BossPattern.DT01Slam || boss.Pattern==BossPattern.BBurrowLeap
-                    ? "큰 빈틈  ·  턱과 몸통에 반격" : "짧은 숨 고르기  ·  다음 움직임에 대비";
-                accent=mint;
-            }
-            else if(boss.State==BossState.Transition)
-                text="갑주가 떨어지고, 뿌리가 풀려난다";
-            if(text.Length==0)return;
-            Draw(new Rect(300,597,680,43),new Color(.04f,.06f,.055f,.91f));
-            GUI.Label(new Rect(306,601,668,32),text,centered);
-            // Only the genuine recovery receives the green opening marker.
-            if(boss.State==BossState.Recovery)
-                Draw(new Rect(560,641,160*(1-boss.StateProgress),2),accent);
+                    BossPattern.DT02Sweep=>"앞발 휘두르기 · 점프 또는 범위 밖으로 대시",
+                    BossPattern.DT03Bite=>"벌어지는 입 · 물기 범위에서 벗어나세요",
+                    BossPattern.BBurrowLeap=>boss.AttackStage=="wave_delay"||boss.AttackStage=="wave"?"착지 뒤 낮은 파동 · 타이밍을 맞춰 넘으세요":"땅속을 따라 움직인다 · 착지 표시를 살피세요",
+                    BossPattern.WholeBodyBite=>"몸 전체가 좌우로 넘어간다 · 바닥의 두 표시를 살피세요",
+                    BossPattern.ARockfall=>"다시 울부짖는다 · 낙석을 준비하세요",_=>""};
+            else if(boss.State==BossState.Recovery){text=boss.Pattern==BossPattern.WholeBodyBite?"긴 숨 고르기 · 다가가 반격":"짧은 틈이 열린다 · 한 번 반격";accent=mint;}
+            if(text.Length>0){Draw(new Rect(340,597,600,42),new Color(.03f,.05f,.04f,.86f));GUI.color=accent;GUI.Label(new Rect(350,604,580,28),text,smallCenter);GUI.color=Color.white;}
         }
+
         private void DrawIntroduction()
         {
             string text=session.IntroStage switch {

@@ -24,6 +24,12 @@ namespace FourGuardians.BossFight
         private string lastPosePattern = "", lastPoseStage = "idle";
         private float lastPoseProgress, lastFacing = -1f;
         private bool introApplied;
+        private bool turning;
+        private float turnProgress;
+        private int turnFrom=-1,turnTo=-1,wholeSide=-1,wholeFirst=-1;
+        public void SetWholeBodyState(int first,int side){wholeFirst=first;wholeSide=side;}
+        public void SetTurnState(bool active,float progress,int from,int to)
+        {turning=active;turnProgress=Mathf.Clamp01(progress);turnFrom=from;turnTo=to;}
         private bool mainVisible = true;
         private sealed class PlateDebris
         {
@@ -223,7 +229,7 @@ namespace FourGuardians.BossFight
             horizontalSpeed = Time.deltaTime > 0f ? (transform.position.x-lastRootX)/Time.deltaTime : 0f;
             lastRootX = transform.position.x;
             introApplied = false;
-            rig.localPosition = Vector3.zero;
+            rig.localPosition = HasV2Artwork ? new Vector3(facing*1.2f,0,0) : Vector3.zero;
             rig.localRotation = Quaternion.identity;
             float p = Mathf.Clamp01(normalized);
             string state = (stage ?? "idle").ToLowerInvariant();
@@ -256,11 +262,45 @@ namespace FourGuardians.BossFight
             }
             if (state == "dead") death = Mathf.Max(death,p);
             if (HasV2Artwork) ApplyV2CombatPose(move, state);
-            AlignAttackLimbs(move, state);
+            if(turning && HasV2Artwork) ApplyTurnPose();
+            else if(move=="WHOLEBODYBITE" && HasV2Artwork)ApplyWholeBodyPose(state);
+            else AlignAttackLimbs(move, state);
             ApplyDeath();
             ApplyVisibility();
             ApplyColors();
             UpdateGroundShadow();
+        }
+
+        private void ApplyTurnPose()
+        {
+            // Fixed ground root pivot. Retract the whole attached front through the center,
+            // then extend it on the other side; no instantaneous world-scale mirror.
+            rig.localScale=Vector3.one;rig.localPosition=Vector3.zero;
+            float sign=-turnFrom*Mathf.Cos(Mathf.PI*turnProgress);
+            ResetPart(body);ResetPart(roots);
+            roots.joint.localPosition=new Vector3(0,roots.restPosition.y,0);
+            roots.joint.localScale=new Vector3(sign,1,1);
+            body.joint.localPosition=new Vector3((body.restPosition.x-1.2f)*sign,body.restPosition.y+Mathf.Sin(Mathf.PI*turnProgress)*.28f,0);
+            body.joint.localScale=new Vector3(sign,1,1);
+            Rotate(body,Mathf.Sin(Mathf.PI*turnProgress)*turnFrom*16f);
+            OpenMouth(.12f);
+        }
+
+        private void ApplyWholeBodyPose(string state)
+        {
+            string step=presentationAttackStage;float p=presentationAttackProgress;
+            float sign=-wholeSide,angle=wholeSide*30f,lift=0;
+            if(step=="whole_tell")angle=wholeFirst*30f*Ease(p);
+            else if(step=="whole_arc")angle=Mathf.Lerp(wholeSide*30f,-wholeSide*30f,Ease(p));
+            else if(step=="whole_hit")angle=-wholeSide*30f;
+            else if(step=="whole_cross")
+            {sign=-wholeFirst*Mathf.Cos(Mathf.PI*p);angle=-wholeFirst*30f;lift=Mathf.Sin(Mathf.PI*p)*.25f;}
+            else if(state=="recovery"){sign=-lastFacing;angle=-lastFacing*30f*(1-Ease(Mathf.Clamp01(p/.55f)));}
+            rig.localPosition=Vector3.zero;rig.localScale=Vector3.one;
+            ResetPart(body);ResetPart(roots);roots.joint.localPosition=new Vector3(0,roots.restPosition.y,0);roots.joint.localScale=new Vector3(sign,1,1);
+            Vector3 offset=new Vector3((body.restPosition.x-1.2f)*sign,body.restPosition.y,0);
+            body.joint.localPosition=Quaternion.Euler(0,0,angle)*offset+Vector3.up*lift;
+            body.joint.localScale=new Vector3(sign,1,1);Rotate(body,angle);OpenMouth(state=="recovery"?.35f:.80f);
         }
 
         private void ApplyAttackPose(string move, string state, float fallbackProgress)
@@ -494,20 +534,14 @@ namespace FourGuardians.BossFight
                 Shift(body,0f,Mathf.Abs(Mathf.Sin(cycle))*.025f*light);
                 Scale(roots,1f+Mathf.Sin(cycle-.7f)*.035f,1f);
             }
-            if(state=="transition"||step=="transition")
+            if(state=="transition")
             {
-                float t=presentationTransitionProgress;
-                ResetPart(body);ResetPart(roots);ResetPart(nearPaw);ResetPart(farPaw);ResetPart(jaw);
-                float slump=Mathf.Sin(Mathf.PI*Mathf.Clamp01(t/.65f));
-                float twist=Mathf.Sin(t*38f)*Mathf.SmoothStep(0f,1f,t/.18f)*(1f-Ease(Mathf.InverseLerp(.45f,.75f,t)));
-                Shift(body,twist*.055f,-.22f*slump);Rotate(body,twist*2.8f);
-                Rotate(nearPaw,9f*slump);Rotate(farPaw,-5f*slump);
-                OpenMouth(Mathf.Sin(Mathf.PI*t)*.8f);
-                float retract=Ease(Mathf.InverseLerp(.50f,1f,t));
-                Scale(roots,1f-.14f*retract,1f-.18f*retract);
-                Shift(roots,-.10f*retract,-.38f*retract);
-                for(int i=0;i<4;i++)if(armorParts[i]!=null && (presentationArmorMask&(1<<i))!=0)
-                    Rotate(armorParts[i],twist*(i%2==0?3f:-3f));
+                ResetPart(body);ResetPart(roots);ResetPart(nearPaw);ResetPart(farPaw);ResetPart(jaw);ResetPart(mouth);
+                bool roaring=step=="phase_roar";
+                float slump=roaring?1-Ease(presentationAttackProgress):1f;
+                Shift(body,0,-.23f*slump);Rotate(body,2.5f*slump);Rotate(nearPaw,8f*slump);
+                OpenMouth(roaring?.95f:.12f);
+                if(roaring){Rotate(jaw,17);Scale(mouth,1.12f,1.18f);Shift(body,Mathf.Sin(Time.time*38)*.025f,.03f);}
             }
             // Dorsal trees are one fixed two-tree sprite; losing armor never adds foliage or swaps hooves.
             if(dorsalTrees!=null)Rotate(dorsalTrees,Mathf.Sin(Time.time*1.2f)*.65f);
@@ -771,7 +805,7 @@ namespace FourGuardians.BossFight
             flash=death=horizontalSpeed=0f;
             lastRootX=transform.position.x;
             lastPosePattern="";lastPoseStage="idle";lastPoseProgress=0f;lastFacing=-1f;
-            introApplied=false;mainVisible=true;
+            introApplied=false;mainVisible=true;turning=false;turnProgress=0;turnFrom=turnTo=-1;
             // Authoritative phase/armor inputs are retained; only transient visuals reset.
         }
         private void OnDestroy() { ClearRig(); }

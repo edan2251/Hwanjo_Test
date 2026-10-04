@@ -6,8 +6,8 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/BossFight/Scenes/DocheolArena.unity
-    guid: 333a4cd9597d4f043b9aa26b878ac580
+    path: Assets/BossFight/Scenes/DocheolArenaV4.unity
+    guid: 21d77c561825a8549a1840fbfd044e25
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0
