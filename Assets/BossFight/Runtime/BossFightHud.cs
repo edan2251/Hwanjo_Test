@@ -93,13 +93,15 @@ namespace FourGuardians.BossFight
                 GUI.Label(new Rect(365,120,550,26),"낙석 중  ·  위와 바닥의 그림자를 함께 보세요",smallCenter);
             string text="";
             Color accent=new Color(.95f,.65f,.29f);
-            if(boss.State==BossState.Link)
+            if(boss.State==BossState.Followup)
+                text="착지 뒤에도 이어진다  ·  다음 자세를 보세요";
+            else if(boss.State==BossState.Link)
                 text="동작이 이어진다  ·  다음 자세를 보세요";
             else if(boss.State==BossState.Telegraph || boss.State==BossState.Active)
             {
                 text=boss.Pattern switch {
                     BossPattern.DT01Slam => "높이 든 앞발  ·  턱 아래로 파고들기",
-                    BossPattern.DT02Sweep => "낮게 휘두르는 앞발  ·  점프 또는 바깥으로 거리 회피",
+                    BossPattern.DT02Sweep => boss.IsComboFollowup ? "뻗어오는 앞발  ·  점프로 넘으세요" : "낮게 휘두르는 앞발  ·  점프 또는 바깥으로 거리 회피",
                     BossPattern.DT03Bite => "벌어지는 입  ·  물기 범위에서 벗어나기",
                     BossPattern.ARockfall => boss.AttackStage=="breathe"?"포효를 준비한다  ·  천장을 살피세요":"낙석이 시작된다  ·  공격할 순간을 찾으세요",
                     BossPattern.BBurrowLeap => boss.AttackStage=="wave_delay" || boss.AttackStage=="wave"

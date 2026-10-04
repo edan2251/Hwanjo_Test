@@ -211,7 +211,8 @@ namespace FourGuardians.BossFight
                 case "release": Play("rumble", position, 0.7f); break;
                 case "impact":
                     Play("impact", position, 0.64f);
-                    Shake(0.055f * amount, 0.15f);
+                    // Slam is heavier than bite but shorter; the shared rockfall cap still applies.
+                    Shake(0.18f * amount, 0.13f);
                     Burst(position, 8, new Color(0.55f, 0.49f, 0.34f), amount * 0.7f);
                     break;
                 case "land":

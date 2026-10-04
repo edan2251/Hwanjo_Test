@@ -46,7 +46,7 @@ namespace FourGuardians.BossFight
         [Serializable] public sealed class Report
         {
             public string mode, utc, unityVersion, platform, outcome;
-            public string specVersion = "combo-rockfall-v3";
+            public string specVersion = "combo-rockfall-v3-contract-r1";
             public string inputStrategy;
             public int requestedFps, renderedFrames, damageEvents, completedAttacks;
             public float elapsedSeconds, averageFps;
@@ -62,6 +62,7 @@ namespace FourGuardians.BossFight
             public List<ArmorCaptureEvidence> armorCaptures = new List<ArmorCaptureEvidence>();
             public List<V3Case> v3Cases = new List<V3Case>();
             public List<HazardEvidence> hazards = new List<HazardEvidence>();
+            public List<RevisionSafetyEvidence> revisionSafety = new List<RevisionSafetyEvidence>();
         }
         private string presentationCaptureLabel;
         private Report report;
@@ -105,12 +106,12 @@ namespace FourGuardians.BossFight
             Application.targetFrameRate = fps;
             Application.runInBackground = true;
             if (RequestedMode != "observe") Time.timeScale = 1;
-            bool controlled = RequestedMode == "v3matrix" || RequestedMode == "v3phases";
+            bool controlled = RequestedMode == "v3matrix" || RequestedMode == "v3phases" || RequestedMode == "v3revision";
             report = new Report { mode = RequestedMode, utc = DateTime.UtcNow.ToString("o"), unityVersion = Application.unityVersion,
                 platform = Application.platform.ToString(), requestedFps = fps, inputStrategy = "V3 ordinary input; .2s recognition; actual Rigidbody2D physics samples",
                 usesSyntheticDamage = controlled || RequestedMode == "contracts" || RequestedMode == "v3contracts",
-                usesForcedPatterns = RequestedMode == "v3matrix", usesTestRepositioning = controlled || RequestedMode == "contracts" || RequestedMode == "v3contracts",
-                usesModifiedInvulnerability = false, usesPresentationOverrides = RequestedMode == "armorvisual" };
+                usesForcedPatterns = RequestedMode == "v3matrix" || RequestedMode == "v3revision", usesTestRepositioning = controlled || RequestedMode == "contracts" || RequestedMode == "v3contracts",
+                usesModifiedInvulnerability = false, usesPresentationOverrides = RequestedMode == "armorvisual" || RequestedMode == "v3revision" };
             outputPath = Argument("-bossqa-output", Path.Combine(Application.persistentDataPath, "bossqa-" + report.mode + "-" + fps + ".json"));
             captureDirectory = Argument("-bossqa-capture", null);
             Application.logMessageReceived += CaptureError;
@@ -135,6 +136,7 @@ namespace FourGuardians.BossFight
             if (report.mode == "observe") yield return ObserveManualInput();
             else if (report.mode == "contracts" || report.mode == "v3contracts") yield return Contracts();
             else if (report.mode == "v3matrix") yield return V3Matrix();
+            else if (report.mode == "v3revision") yield return V3Revision();
             else if (report.mode == "armorvisual") yield return ArmorVisuals();
             else if (report.mode == "v3phases") yield return V3Phases();
             else if (report.mode == "defeat") yield return NaturalDefeat();
@@ -292,12 +294,13 @@ namespace FourGuardians.BossFight
                 sawPhaseTwo = true;
                 phaseTwoUnarmored &= boss.ArmorCount == 0;
             }
-            bool attacking = boss.State == BossState.Telegraph || boss.State == BossState.Active;
+            if (attackEvidence.TryGetValue(boss.LastCompletedAttackId, out AttackEvidence completed)) completed.completed = true;
+            bool attacking = boss.State == BossState.Telegraph || boss.State == BossState.Active || boss.State == BossState.Link;
             if (boss.AttackId <= 0) return;
             if (!attacking)
             {
                 if (attackEvidence.TryGetValue(boss.AttackId, out AttackEvidence ended))
-                    ended.completed |= boss.State == BossState.Recovery || boss.State == BossState.Link;
+                    ended.completed |= boss.State == BossState.Recovery || boss.State == BossState.Followup;
                 return;
             }
             AttackEvidence sample = GetAttackEvidence();
@@ -364,7 +367,7 @@ namespace FourGuardians.BossFight
         private void RecordAttackPhysicsAssertions()
         {
             // Presentation-only and passive observer modes must not imply combat certification.
-            if (report.mode != "v3matrix" && report.mode != "v3ai" && report.mode != "victory" && report.mode != "survival") return;
+            if (report.mode != "v3matrix" && report.mode != "v3revision" && report.mode != "v3ai" && report.mode != "victory" && report.mode != "survival") return;
             int completed = 0, active = 0;
             foreach (AttackEvidence sample in report.attacks)
             {
@@ -544,7 +547,7 @@ namespace FourGuardians.BossFight
                 if (item.GetType().Name == "BossFightSession") return item;
             return null;
         }
-        private IEnumerator PrepareControlledCase(int phase, float bossX, float playerX)
+        private IEnumerator PrepareControlledCase(int phase, float bossX, float playerX, int seed = 20261003)
         {
             // Let a previous case's capture render before controlled setup mutates the scene.
             if (!Application.isBatchMode) yield return new WaitForEndOfFrame();
@@ -552,6 +555,7 @@ namespace FourGuardians.BossFight
             attackEvidence.Clear();
             evidenceCase++;
             boss.ResetFight(new Vector2(bossX, boss.FloorY));
+            boss.ConfigureRockfallSeed(seed);
             player.ResetForFight(new Vector2(playerX, boss.FloorY + .025f));
             player.SetExternalInput(true);
             player.Health.ConfigureInvulnerability(.8f);
@@ -729,6 +733,9 @@ namespace FourGuardians.BossFight
             public int acceptedJumps;
             public bool cancelAttackAccepted, cancelDashRequested, cancelDashAccepted;
             public float cancelDelay = -1;
+            public string burrowExit;
+            public bool sawBurrowBrace, burrowBranchValid = true;
+            public float burrowFirstBasicTell = -1, burrowRestObserved = -1;
             public bool forced, complete, sawLink, fakeRecovery, directionChanged, sawWave, sawRise, sawLanding, sawRockfall, basicDuringRockfall, burrowDuringRockfall, rockfallDamageable = true;
             public float physicsTravel, peakFeet, initialX, finalX, inwardTravelAfterJump, reactionDelay = .2f;
             public List<string> timeline = new List<string>();
@@ -858,7 +865,10 @@ namespace FourGuardians.BossFight
                 if (boss.Pattern == BossPattern.DT02Sweep)
                 {
                     // A front paw sweep is a local fast hit; this deliberately does not reuse V2 travelling-wave ETA.
-                    if (!jumpRequested && player.Movement.IsGrounded && boss.State == BossState.Telegraph)
+                    // Long, explicitly braced B followups need a later jump. The current tell's
+                    // progress is observable; no future plan or escape-route API supplies this input.
+                    float remainingTell = boss.LockedTellDuration * (1f - boss.StateProgress);
+                    if (!jumpRequested && player.Movement.IsGrounded && boss.State == BossState.Telegraph && remainingTell <= .22f)
                         jump = true;
                 }
                 else if (boss.Pattern == BossPattern.BBurrowLeap && (boss.AttackStage == "wave_delay" || boss.AttackStage == "wave"))
@@ -1171,9 +1181,13 @@ namespace FourGuardians.BossFight
                         "same initial fixture; forcedPlanSafeHits=" + safe.planIncomingHits + " forcedPlanGreedHits=" + greed.planIncomingHits + " safeAcceptedAttacks=" + safe.acceptedAttacks + " greedAcceptedAttacks=" + greed.acceptedAttacks + "; requires actual risk difference, not green UI suppression");
                 }
                 if (requestedCase == "all" || requestedCase == "3-2") yield return V3Measure(phase, "3-2", 2.8f, -.4f, true, true);
-                if (requestedCase == "all" || requestedCase == "B") yield return V3Measure(phase, "B", 2.8f, -.4f, false);
-                if (requestedCase == "all" || requestedCase == "B") yield return V3Measure(phase, "B", boss.ArenaLeft + 3.1f, boss.ArenaLeft + .8f, false);
-                if (requestedCase == "all" || requestedCase == "B") yield return V3Measure(phase, "B", boss.ArenaRight - 3.1f, boss.ArenaRight - .8f, false);
+                if (requestedCase == "all" || requestedCase == "B")
+                    foreach (string exitPlan in new[] { "rest", phase == 1 ? "3-2" : "2-1" })
+                    {
+                        yield return V3Measure(phase, "B", 2.8f, -.4f, false, false, exitPlan);
+                        yield return V3Measure(phase, "B", boss.ArenaLeft + 3.1f, boss.ArenaLeft + .8f, false, false, exitPlan);
+                        yield return V3Measure(phase, "B", boss.ArenaRight - 3.1f, boss.ArenaRight - .8f, false, false, exitPlan);
+                    }
                 if (requestedCase == "all" || requestedCase == "A")
                 {
                     yield return V3Measure(phase, "A", 2.8f, -.4f, false);
@@ -1192,7 +1206,7 @@ namespace FourGuardians.BossFight
             yield return Finish("v3_matrix_complete");
         }
 
-        private IEnumerator V3Measure(int phase, string code, float bossX, float playerX, bool reckless, bool dashCancel = false)
+        private IEnumerator V3Measure(int phase, string code, float bossX, float playerX, bool reckless, bool dashCancel = false, string burrowExit = null)
         {
             yield return PrepareControlledCase(phase, bossX, playerX);
             if (code == "A" && phase == 1)
@@ -1200,7 +1214,7 @@ namespace FourGuardians.BossFight
                 boss.Health.TakeDamage(new DamageInfo(12, boss.GetArmorWorldPoint(3), Vector2.zero, gameObject));
                 yield return Drive(.18f);
             }
-            V3Case sample = new V3Case { name = "P" + phase + "_" + code + "_x" + playerX.ToString("F1") + (dashCancel ? "_dashcancel" : reckless ? "_greed" : "_safe"), phase = phase, requested = code,
+            V3Case sample = new V3Case { name = "P" + phase + "_" + code + (burrowExit == null ? "" : "-exit-" + burrowExit) + "_x" + playerX.ToString("F1") + (dashCancel ? "_dashcancel" : reckless ? "_greed" : "_safe"), phase = phase, requested = code, burrowExit = burrowExit,
                 strategy = reckless ? ".2s reaction; evade first hit, attack/advance during Link and followup tell" : ".2s recognition; walk outside bite/slam, jump paw/wave, walk nearest body for retaliation",
                 initialDisclosure = "ResetFight/ResetForFight initial placement; synthetic P2/late-P1 HP before force; ordinary invulnerability; measurement begins at Force and ends after natural followup or A expiration", initialX = player.Body.position.x };
             if (dashCancel) sample.strategy = "evade bite; normal attack during Link; .12 scaled seconds after accepted attack, request ordinary outward dash cancel; preserve actual hit/damage result";
@@ -1215,14 +1229,14 @@ namespace FourGuardians.BossFight
             reactionAttack = -1;
             int damageBefore = report.damageEvents;
             uint sequenceBefore = player.Movement.AttackSequence;
-            sample.forced = code == "A" ? boss.ForcePattern(BossPattern.ARockfall) : code == "B" ? boss.ForcePattern(BossPattern.BBurrowLeap) : boss.ForceCombo(code);
+            sample.forced = code == "A" ? boss.ForcePattern(BossPattern.ARockfall) : code == "B" ? boss.ForceBurrowPlan(burrowExit ?? "rest") : boss.ForceCombo(code);
             string plan = boss.ComboCode;
             int facing = boss.Facing;
             bool sawFinalRecovery = false, sawFollowup = false, jumpedSweep = false, reachedInsideSlam = false;
             float lastPlayerX = player.Body.position.x;
             int finalAttack = -1, lastAttack = -1, followupDamageBefore = -1;
             string lastStage = "";
-            float until = Time.realtimeSinceStartup + (code == "A" ? 18f : 16f);
+            float until = Time.realtimeSinceStartup + (code == "A" ? 18f : code == "B" ? 28f : 20f);
             Action<DamageInfo> onHit = info => { if (boss.State == BossState.Recovery && !sawFollowup) sample.recoveryHits++; if (boss.RockfallActive) sample.rockfallBossHits++; if (boss.State == BossState.Link || (boss.ComboIndex > 0 && boss.State == BossState.Telegraph)) sample.comboRetaliationHits++; };
             boss.Health.DamageTaken += onHit;
             while (sample.forced && !player.IsDead && !boss.Health.IsDead && Time.realtimeSinceStartup < until)
@@ -1243,6 +1257,17 @@ namespace FourGuardians.BossFight
                 sample.sawRise |= boss.Pattern == BossPattern.BBurrowLeap && boss.transform.position.y > boss.FloorY + 1.5f;
                 sample.sawLanding |= boss.Pattern == BossPattern.BBurrowLeap && boss.AttackStage == "land";
                 sample.sawRockfall |= boss.RockfallActive;
+                if (code == "B" && !sawFinalRecovery)
+                {
+                    sample.sawBurrowBrace |= boss.State == BossState.Followup;
+                    sample.burrowBranchValid &= boss.Pattern != BossPattern.ARockfall && boss.BurrowExitPlan == burrowExit;
+                    if (boss.Pattern != BossPattern.BBurrowLeap && boss.State == BossState.Telegraph && sample.burrowFirstBasicTell < 0)
+                    {
+                        sample.burrowFirstBasicTell = boss.LockedTellDuration;
+                        sample.burrowBranchValid &= boss.ComboCode == burrowExit && boss.BurrowPackageActive;
+                    }
+                    if (boss.State == BossState.Recovery && boss.Pattern == BossPattern.BBurrowLeap) sample.burrowRestObserved = boss.RecoveryRemaining;
+                }
                 if (boss.RockfallActive)
                 {
                     sample.basicDuringRockfall |= boss.Pattern == BossPattern.DT01Slam || boss.Pattern == BossPattern.DT02Sweep || boss.Pattern == BossPattern.DT03Bite;
@@ -1279,12 +1304,149 @@ namespace FourGuardians.BossFight
             sample.finalX = player.Body.position.x;
             Record(sample.name + "_executed", sample.forced && sample.complete && sample.physicsSteps > 0, "complete=" + sample.complete + " physicsSteps=" + sample.physicsSteps + " travel=" + sample.physicsTravel.ToString("F3") + " acceptedAttacks=" + sample.acceptedAttacks + " recoveryHits=" + sample.recoveryHits + " incomingHits=" + sample.incomingHits);
             if (dashCancel) Record(sample.name + "_cancel_input_observed", sample.cancelAttackAccepted && sample.cancelDashRequested && sample.cancelDashAccepted, "attackAccepted=" + sample.cancelAttackAccepted + " dashRequested=" + sample.cancelDashRequested + " dashAccepted=" + sample.cancelDashAccepted + " delay=" + sample.cancelDelay.ToString("F3") + " planHits=" + sample.planIncomingHits + " retaliationHits=" + sample.comboRetaliationHits + "; ordinary player cancellation is preserved; no universal retaliation-impossibility claim");
+            if (dashCancel) Record(sample.name + "_cancel_retaliation_has_risk", sample.planIncomingHits > 0, "same ordinary attack+.12s outward dash strategy; forced-plan incoming hits=" + sample.planIncomingHits + "; player cancel code and hit volume width/height unchanged");
             if (!reckless) Record(sample.name + "_ordinary_input_evasion", sample.incomingHits == 0 && !player.IsDead, "reaction=.2s hits=" + sample.incomingHits + " jumps=" + sample.jumps + " actualBodyTravel=" + sample.physicsTravel.ToString("F3") + "; no state edits after force");
             if (code.Contains("-")) Record(sample.name + "_committed_combo", sample.sawLink && !sample.fakeRecovery && !sample.directionChanged, "Link=" + sample.sawLink + " fakeRecoveryOrChangedPlan=" + sample.fakeRecovery + " directionChanged=" + sample.directionChanged);
             if (code == "2-1") Record(sample.name + "_jump_then_inside", jumpedSweep && reachedInsideSlam && sample.incomingHits == 0 && sample.inwardTravelAfterJump > .1f, "reachedInsideSlam=" + reachedInsideSlam + " jumpedSweep=" + jumpedSweep + " inwardPhysicsTravel=" + sample.inwardTravelAfterJump.ToString("F3"));
             if (code == "B") Record(sample.name + "_burrow_leap_wave", sample.sawRise && sample.sawLanding && sample.sawWave == (phase == 2), "rise=" + sample.sawRise + " land=" + sample.sawLanding + " wave=" + sample.sawWave);
+            if (code == "B") Record(sample.name + "_explicit_exit_branch", sample.burrowBranchValid && (burrowExit == "rest" ? !sample.sawBurrowBrace && sample.burrowRestObserved >= 1.08f : sample.sawBurrowBrace && sample.burrowFirstBasicTell >= .89f && sample.burrowRestObserved < 0), "chosenBeforeB=" + burrowExit + " brace=" + sample.sawBurrowBrace + " firstBasicTell=" + sample.burrowFirstBasicTell.ToString("F3") + " restObserved=" + sample.burrowRestObserved.ToString("F3") + "; no A before first true recovery");
             if (code == "A") Record(sample.name + "_rockfall_and_basic_path", sample.sawRockfall && sample.basicDuringRockfall && !sample.burrowDuringRockfall && sample.rockfallDamageable && sample.rockfallBossHits > 0 && sample.physicsTravel > .3f, "rocks=" + sample.sawRockfall + " basics=" + sample.basicDuringRockfall + " B=" + sample.burrowDuringRockfall + " bossDamageable=" + sample.rockfallDamageable + " actualBossHitsDuringRocks=" + sample.rockfallBossHits + " physicsTravel=" + sample.physicsTravel.ToString("F3"));
             CaptureFrame(sample.name + "-complete");
+        }
+
+        [Serializable] public sealed class RevisionSafetyEvidence
+        {
+            public string name, draws;
+            public int seed, phase, spawnedRocks, basicStartsDuringRocks, startsWhileLocked, spawnsWhileLocked, committedFollowupsWhileLocked, peakWarnings, safetyWaits, incomingHits;
+            public bool roarAttackAccepted, basicAttackAccepted, finished;
+        }
+
+        private IEnumerator V3Revision()
+        {
+            // Separate controlled exclusion fixture; never force a special into an evasion run.
+            yield return PrepareControlledCase(1,2.8f,-.4f);
+            boss.Health.TakeDamage(new DamageInfo(12,boss.GetArmorWorldPoint(3),Vector2.zero,gameObject));
+            yield return Drive(.18f);
+            bool beganB=boss.ForceBurrowPlan("3-2");
+            bool rejectedA=!boss.ForcePattern(BossPattern.ARockfall);
+            Record("r1_B_package_rejects_forced_A", beganB && rejectedA && boss.Pattern==BossPattern.BBurrowLeap && boss.BurrowPackageActive, "late-P1 HP28 allows A generally, but B's preselected package excludes it even through the QA selection hook");
+            yield return MeasureRockSafety(1, boss.ArenaLeft + .8f, 20261003, "left_locked");
+            yield return MeasureRockSafety(2, boss.ArenaRight - .8f, 20261003, "right_locked_same_seed");
+            yield return MeasureRockSafety(2, -.4f, 9377, "center_other_seed");
+            RevisionSafetyEvidence a = report.revisionSafety[0], b = report.revisionSafety[1], c = report.revisionSafety[2];
+            int common = Mathf.Min(a.draws.Length, b.draws.Length);
+            Record("r1_rock_seed_reproducible", common >= 4 && a.draws.Substring(0,common) == b.draws.Substring(0,common), "actual production draws across different phases/positions; seed=" + a.seed + " left=" + a.draws + " right=" + b.draws);
+            int different = Mathf.Min(a.draws.Length, c.draws.Length);
+            Record("r1_rock_seed_changes_sequence", different >= 4 && a.draws.Substring(0,different) != c.draws.Substring(0,different), "seed20261003=" + a.draws + " seed9377=" + c.draws + "; bounded weighted random, not a cyclic size schedule or statistical distribution proof");
+            Record("r1_overlapping_visible_rock_warnings", report.revisionSafety.Exists(x => x.peakWarnings >= 2), "peak simultaneous warnings=" + Mathf.Max(a.peakWarnings, Mathf.Max(b.peakWarnings,c.peakWarnings)));
+            yield return MeasureFeedbackHierarchy();
+            yield return Finish("v3_revision_safety_complete");
+        }
+
+        private IEnumerator MeasureRockSafety(int phase, float playerX, int seed, string label)
+        {
+            yield return PrepareControlledCase(phase, 2.8f, playerX, seed);
+            if (phase == 1) { boss.Health.TakeDamage(new DamageInfo(12, boss.GetArmorWorldPoint(3), Vector2.zero, gameObject)); yield return Drive(.18f); }
+            RevisionSafetyEvidence sample = new RevisionSafetyEvidence { name=label, seed=seed, phase=phase };
+            report.revisionSafety.Add(sample);
+            int before = report.damageEvents;
+            int waitsBefore = boss.SafetyWaitCount;
+            bool sawRocks = false, roarRequested=false, basicRequested=false;
+            float holdUntil=-1;
+            uint beforeRoar=player.Movement.AttackSequence, beforeBasic=beforeRoar;
+            Action<string,Vector2,float> audit = (cue,point,strength) =>
+            {
+                if (cue == "rockfall_warning") { sample.spawnedRocks++; if (!boss.EscapePreviewAvailable) sample.spawnsWhileLocked++; }
+                if (cue == "telegraph" && boss.RockfallActive)
+                {
+                    bool locked = !boss.EscapePreviewAvailable;
+                    // BeginBasic also emits this cue for an already committed combo step.
+                    // The contract forbids a NEW choice without a route; it does not cancel
+                    // a selected sequence when the player subsequently locks their action.
+                    if (boss.ComboIndex == 0)
+                    {
+                        sample.basicStartsDuringRocks++;
+                        if (locked) sample.startsWhileLocked++;
+                    }
+                    else if (locked) sample.committedFollowupsWhileLocked++;
+                    report.events.Add("A choice audit fixture="+label+" id="+boss.AttackId+" plan="+boss.ComboCode+" step="+boss.ComboIndex+" locked="+locked+" playerAction="+player.Movement.Action);
+                }
+            };
+            boss.Cued += audit;
+            bool began = boss.ForcePattern(BossPattern.ARockfall);
+            reactionAttack=-1; botAttackClockInitialized=false; nextRockInputTrace=0;
+            float until=Time.realtimeSinceStartup+15;
+            while (began && !player.IsDead && Time.realtimeSinceStartup < until)
+            {
+                sawRocks |= boss.RockfallActive;
+                int warnings=0;
+                bool positionClear=true;
+                foreach (DocheolRockfall rock in boss.Rockfalls)
+                {
+                    if (rock.Stage == "warning" || rock.Stage == "fall") warnings++;
+                    if (rock.Stage != "dust" && rock.Stage != "done" && player.HurtBounds.max.x > rock.WarningBounds.min.x-.1f && player.HurtBounds.min.x < rock.WarningBounds.max.x+.1f) positionClear=false;
+                }
+                sample.peakWarnings=Mathf.Max(sample.peakWarnings,warnings);
+                if (!roarRequested && boss.Pattern == BossPattern.ARockfall && boss.AttackStage == "roar" && boss.AttackStageProgress >= .55f)
+                {
+                    roarRequested=true; beforeRoar=player.Movement.AttackSequence; holdUntil=Time.time+.22f;
+                }
+                bool basic = boss.Pattern == BossPattern.DT01Slam || boss.Pattern == BossPattern.DT02Sweep || boss.Pattern == BossPattern.DT03Bite;
+                bool outsideBasic = boss.WarningBounds.size.x <= 0 || player.HurtBounds.max.x < boss.WarningBounds.min.x-.1f || player.HurtBounds.min.x > boss.WarningBounds.max.x+.1f;
+                if (roarRequested && player.Movement.AttackSequence > beforeRoar) sample.roarAttackAccepted=true;
+                if (!basicRequested && sample.roarAttackAccepted && basic && boss.State == BossState.Telegraph && boss.RockfallActive && positionClear && outsideBasic && player.Movement.IsGrounded && boss.EscapePreviewAvailable)
+                {
+                    basicRequested=true; beforeBasic=player.Movement.AttackSequence; holdUntil=Time.time+.22f;
+                }
+                if (basicRequested && player.Movement.AttackSequence > beforeBasic) sample.basicAttackAccepted=true;
+                if (Time.time < holdUntil) player.SubmitInput(0,false,true,false);
+                else V3Input(false);
+                if (boss.State == BossState.Waiting) CaptureFrame(label+"-verified-wait");
+                if (warnings >= 2) CaptureFrame(label+"-overlapping-warnings");
+                if (sawRocks && !boss.RockfallActive) { sample.finished=true; break; }
+                yield return null;
+            }
+            boss.Cued -= audit;
+            player.SubmitInput(0,false,false,false);
+            sample.safetyWaits=boss.SafetyWaitCount-waitsBefore;
+            sample.incomingHits=report.damageEvents-before;
+            sample.draws="";
+            foreach (RockfallSize size in boss.RockfallSizeDraws) sample.draws+=(int)size;
+            bool bounded=true;
+            for(int i=1;i<sample.draws.Length;i++)
+                if ((sample.draws[i]=='2' && sample.draws[i-1]=='2') || (i>=2 && sample.draws[i]==sample.draws[i-1] && sample.draws[i]==sample.draws[i-2])) bounded=false;
+            Record("r1_"+label+"_fail_closed", began && sample.finished && sample.roarAttackAccepted && sample.safetyWaits>0 && sample.startsWhileLocked==0 && sample.spawnsWhileLocked==0, JsonUtility.ToJson(sample));
+            // Corner fixtures safely request an additional normal attack during a basic's tell.
+            // The center fixture may never be outside that tell, so never manufacture such a lock there.
+            if (label != "center_other_seed") Record("r1_"+label+"_basic_action_lock", sample.basicAttackAccepted, "ordinary player attack accepted during a basic while rocks active="+sample.basicAttackAccepted);
+            Record("r1_"+label+"_ordinary_safe_path", sample.finished && !player.IsDead && sample.incomingHits==0, "actual hits="+sample.incomingHits+"; no state edits after initial A selection");
+            Record("r1_"+label+"_pattern_remains_active", sample.spawnedRocks>=2 && sample.basicStartsDuringRocks>0, "spawned="+sample.spawnedRocks+" basics="+sample.basicStartsDuringRocks+" waits="+sample.safetyWaits);
+            Record("r1_"+label+"_bounded_sizes", bounded && sample.draws.Length>=4, "draws="+sample.draws+"; max run two, no consecutive large");
+        }
+
+        private IEnumerator MeasureFeedbackHierarchy()
+        {
+            boss.SetFightActive(false); player.SubmitInput(0,false,false,false);
+            MonoBehaviour session=FindSession(); bool wasEnabled=session.enabled; session.enabled=false;
+            BossFightFeedback effects=session.GetComponent<BossFightFeedback>();
+            Camera camera=Camera.main;
+            float savedScale=effects.ShakeScale; effects.ShakeScale=.65f;
+            float[] peaks=new float[3];
+            string[] cues={"bite","impact","impact"};
+            for(int i=0;i<cues.Length;i++)
+            {
+                effects.ResetEffects(); effects.SetHazardReadability(i==2);
+                effects.PlayCue(cues[i],boss.transform.position,.5f);
+                float end=Time.realtimeSinceStartup+.30f;
+                while(Time.realtimeSinceStartup<end)
+                {
+                    yield return new WaitForEndOfFrame();
+                    peaks[i]=Mathf.Max(peaks[i],Vector3.Distance(camera.transform.position,new Vector3(0,3.6f,-10)));
+                }
+            }
+            Record("r1_slam_camera_heavier_than_bite", peaks[0]>0 && peaks[1]>peaks[0]*1.5f, "rendered peak displacement at65%; bite="+peaks[0].ToString("F5")+" slam="+peaks[1].ToString("F5"));
+            Record("r1_rockfall_camera_cap", peaks[2]>0 && peaks[2]<=.05f*.65f+.0001f, "rendered peak="+peaks[2].ToString("F5")+" cap=.0325; no subjective audio/game-feel claim");
+            effects.ResetEffects(); effects.ShakeScale=savedScale; session.enabled=wasEnabled;
         }
 
         private IEnumerator V3Natural()
@@ -1298,12 +1460,12 @@ namespace FourGuardians.BossFight
             reactionAttack = -1;
             while (!player.IsDead && !boss.Health.IsDead && Time.realtimeSinceStartup < until)
             {
-                if (attackId != boss.AttackId && boss.AttackId > 0 && boss.ComboIndex == 0)
+                if (attackId != boss.AttackId && boss.AttackId > 0 && boss.ComboIndex == 0 && boss.State == BossState.Telegraph)
                 {
                     attackId = boss.AttackId;
-                    string key = "P" + boss.Phase + ":" + boss.ComboCode;
+                    string key = "P" + boss.Phase + ":" + (string.IsNullOrEmpty(boss.ComboCode) ? boss.Pattern.ToString() : boss.ComboCode);
                     choices[key] = choices.TryGetValue(key, out int n) ? n + 1 : 1;
-                    report.events.Add("AI choice t=" + (Time.realtimeSinceStartup-startedAt).ToString("F3") + " " + key + " id=" + attackId);
+                    report.events.Add("AI choice t=" + (Time.realtimeSinceStartup-startedAt).ToString("F3") + " " + key + " id=" + attackId + (boss.Pattern == BossPattern.BBurrowLeap ? " exit=" + boss.BurrowExitPlan : ""));
                 }
                 if (boss.State == BossState.Recovery && recovered != boss.AttackId) { recovered = boss.AttackId; report.completedAttacks++; }
                 V3Input(true);
@@ -1404,7 +1566,7 @@ namespace FourGuardians.BossFight
 
         private void RecordAcceptedDamageAssertions()
         {
-            if (report.mode != "v3matrix" && report.mode != "v3ai" && report.mode != "victory" && report.mode != "survival" && report.mode != "defeat") return;
+            if (report.mode != "v3matrix" && report.mode != "v3revision" && report.mode != "v3ai" && report.mode != "victory" && report.mode != "survival" && report.mode != "defeat") return;
             bool unique = true;
             foreach (KeyValuePair<int, int> entry in acceptedDamageCounts) unique &= entry.Value <= 1;
             Record("v3_exact_attack_id_damage_attribution", report.acceptedDamage.Count == report.damageEvents,
