@@ -79,7 +79,12 @@ namespace FourGuardians.BossFight
             }
             GUI.Label(new Rect(38,665,860,25),"A D / \u2190 \u2192 \uc774\ub3d9    SPACE \uc810\ud504    J \uacf5\uaca9    SHIFT / K \ub300\uc2dc",small);
             GUI.Label(new Rect(1015,665,235,25),"ESC \uc77c\uc2dc\uc815\uc9c0   \u00b7   R \uc7ac\ub3c4\uc804",small);
-            if(session.State==EncounterState.Fighting)DrawPatternHint();
+            if(session.State==EncounterState.Fighting)
+            {
+                DrawPatternHint();
+                if(Time.unscaledTime-session.LastRootDeflectTime<.55f)
+                    GUI.Label(new Rect(460,104,360,24),"단단한 뿌리 · 피해 없음",smallCenter);
+            }
             if(session.State==EncounterState.Introduction)DrawIntroduction();
             if(session.State==EncounterState.Paused)DrawPause();
             if(session.State==EncounterState.Victory||session.State==EncounterState.Defeat)DrawResult();
@@ -99,8 +104,9 @@ namespace FourGuardians.BossFight
                     BossPattern.DT02Sweep=>"앞발 휘두르기 · 점프 또는 범위 밖으로 대시",
                     BossPattern.DT03Bite=>"벌어지는 입 · 물기 범위에서 벗어나세요",
                     BossPattern.BBurrowLeap=>boss.AttackStage=="wave_delay"||boss.AttackStage=="wave"?"착지 뒤 낮은 파동 · 타이밍을 맞춰 넘으세요":"땅속을 따라 움직인다 · 착지 표시를 살피세요",
-                    BossPattern.WholeBodyBite=>"몸 전체가 좌우로 넘어간다 · 바닥의 두 표시를 살피세요",
+                    BossPattern.WholeBodyBite=>boss.AttackStage=="whole_final_windup"?"몸을 다시 젖힌다 · 마지막 왼쪽을 기다리세요":"좌우로 네 번 · 마지막 왼쪽까지 피하세요",
                     BossPattern.ARockfall=>"다시 울부짖는다 · 낙석을 준비하세요",_=>""};
+            else if(boss.State==BossState.ActionWait){text="거대한 몸이 자리를 잡는다 · 다음 움직임을 살핀다";accent=Color.gray;}
             else if(boss.State==BossState.Recovery){text=boss.Pattern==BossPattern.WholeBodyBite?"긴 숨 고르기 · 다가가 반격":"짧은 틈이 열린다 · 한 번 반격";accent=mint;}
             if(text.Length>0){Draw(new Rect(340,597,600,42),new Color(.03f,.05f,.04f,.86f));GUI.color=accent;GUI.Label(new Rect(350,604,580,28),text,smallCenter);GUI.color=Color.white;}
         }

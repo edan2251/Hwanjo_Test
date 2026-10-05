@@ -95,7 +95,7 @@ namespace FourGuardians.BossFight
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
         {
-            if (!Requested || RequestedMode.StartsWith("v4", StringComparison.OrdinalIgnoreCase) || FindFirstObjectByType<BossFightQaDriver>() != null) return;
+            if (!Requested || (RequestedMode.StartsWith("v4", StringComparison.OrdinalIgnoreCase) || RequestedMode.StartsWith("v5", StringComparison.OrdinalIgnoreCase)) || FindFirstObjectByType<BossFightQaDriver>() != null) return;
             DontDestroyOnLoad(new GameObject("BossFight Automated QA").AddComponent<BossFightQaDriver>().gameObject);
         }
         private IEnumerator Start()

@@ -11,6 +11,8 @@ namespace FourGuardians.CourseContent.Combat
 
         public CombatTeam Team => health == null ? CombatTeam.Neutral : health.Team;
         public bool IsDead => health == null || health.IsDead;
+        // Optional scene-owned receiver. Original player/course hurtboxes leave this null.
+        public System.Action<DamageInfo> ReceiverOverride { get; set; }
 
         public void Configure(Health2D newHealth)
         {
@@ -19,7 +21,7 @@ namespace FourGuardians.CourseContent.Combat
 
         public void Receive(DamageInfo damageInfo)
         {
-            health?.TakeDamage(damageInfo);
+            if(ReceiverOverride!=null)ReceiverOverride(damageInfo);else health?.TakeDamage(damageInfo);
         }
 
         private void Reset()

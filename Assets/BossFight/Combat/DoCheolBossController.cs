@@ -5,7 +5,7 @@ using FourGuardians.CourseContent.Movement;
 using UnityEngine;
 namespace FourGuardians.BossFight
 {
-    public enum BossState { Dormant, Idle, Telegraph, Active, Recovery, Transition, Dead, Link, Waiting, Followup, Turning, Settling, Reposition, Backdash }
+    public enum BossState { Dormant, Idle, Telegraph, Active, Recovery, Transition, Dead, Link, Waiting, Followup, Turning, Settling, Reposition, Backdash, ActionWait }
     public enum BossPattern { None, DT01Slam, DT02Sweep, DT03Bite, DT04Inhale, DT05BodySlam, DT06Burrow, ARockfall, BBurrowLeap, WholeBodyBite }
     public sealed class DoCheolBossController : MonoBehaviour
     {
@@ -87,13 +87,28 @@ namespace FourGuardians.BossFight
         [Header("Basic attack timing")]
         [SerializeField] private float biteTell = 0.95f, biteStrike = 0.16f, biteRecovery = 0.30f;
         [SerializeField] private float sweepTell = 0.50f, sweepFollowupTell = 0.30f, sweepStrike = 0.16f, sweepRecovery = 0.34f;
-        [SerializeField] private float sweepComboAdvance = 0f;
+        [SerializeField] private float biteAdvance = .28f, sweepAdvance = .22f, comboAdvanceLimit = .50f;
+        public float LockedAdvanceDistance { get; private set; }
+        public float ComboAdvanceDistance { get; private set; }
         [SerializeField] private float comboLink = 0.08f, reactionMargin = 0.20f;
         [Header("Grounded preparation")]
         [SerializeField] private float turnDuration = .78f, settleDuration = .14f;
         [SerializeField] private float repositionSpeed = 3f, backdashSpeed = 8.5f, backdashCooldown = 4.8f;
         private float nextBackdashTime, spacingDestination;
         private string preparedPlan;
+        [Header("V5: committed approach and phase rhythm")]
+        [SerializeField] private float phaseOneActionWait=1.15f, phaseTwoActionWait=.32f;
+        [SerializeField] private float phaseOneApproachLimit=1.65f, phaseTwoApproachLimit=2.1f;
+        private bool decisionOpen, decisionTurnSpent, decisionMoveSpent;
+        public float DecisionTargetX { get; private set; }
+        public int DecisionCount { get; private set; }
+        public int RootBlockCount { get; private set; }
+        public float ActionWaitRemaining => State==BossState.ActionWait?Mathf.Max(0,duration-timer):0;
+        public float PhaseActionWait => Phase==1?phaseOneActionWait:phaseTwoActionWait;
+        public float PreparationSeconds { get; private set; }
+        public int MovementSegmentsThisDecision { get; private set; }
+        public int TurnSegmentsThisDecision { get; private set; }
+        public void RecordRootBlock(Vector2 point){RootBlockCount++;Cue("root_block",point,.25f);}
         [Header("A: grounded roar and persistent rockfall")]
         [SerializeField] private float rockfallCooldown = 18f, rockfallDuration = 5.5f, rockfallInterval = 0.58f;
         [SerializeField] private float breatheDuration = 0.55f, roarDuration = 0.60f, escapeCorridorWidth = 2.2f;
@@ -104,15 +119,21 @@ namespace FourGuardians.BossFight
         [SerializeField] private float landingDuration = 0.16f, landingWidth = 4.4f, waveDelay = 0.44f, waveDuration = 0.90f, leapRecovery = 1.15f;
         [SerializeField] private float burrowFollowupBrace = 0.24f, burrowFollowupTell = 0.90f;
         [Header("Phase-two whole-body bite")]
-        [SerializeField] private float wholeTell=1.05f,wholeArc=.20f,wholeContact=.16f,wholeBridge=1.05f,wholeRecovery=1.70f,wholeCooldown=8.5f;
+        [SerializeField] private float wholeTell=1.80f,wholeArc=.12f,wholeContact=.12f,wholeBridge=.24f,wholeRecovery=1.90f,wholeCooldown=8.5f;
         [SerializeField] private int lateRockfallHealth=10;
         private float nextWholeTime;
         private Bounds wholeFirstBounds,wholeSecondBounds;
-        private bool wholeSecondIdAllocated;
+        [SerializeField] private float wholeFinalDelay=1.05f;
+        private int allocatedWholeIndex;
+        public int WholeContactIndex { get; private set; }
+        public float WholeInitialTell => wholeTell;
+        public float WholeFastInterval => wholeArc+wholeContact+wholeBridge;
+        public float WholeFinalDelay => wholeFinalDelay;
         private SpriteRenderer wholeSecondWarning;
         private BossFightPlayerAdapter player;
         private Health2D health;
         private BoxCollider2D hurtCollider;
+        private DocheolHitRegions hitRegions;
         private Transform hurtRoot;
         private SpriteRenderer warningLine, attackFill, weakPoint;
         private readonly SpriteRenderer[] rangeTicks = new SpriteRenderer[11];
@@ -153,7 +174,12 @@ namespace FourGuardians.BossFight
                 health.Configure(40, CombatTeam.Enemy); health.ConfigureInvulnerability(0.12f);
                 health.Died += OnDied; health.DamageTaken += OnDamageTaken; health.DamageEnabled = false;
             }
-            CreatePresentation(); UpdateHurtbox();
+            CreatePresentation();
+            var regions=GetComponent<DocheolHitRegions>();
+            if(regions==null)regions=gameObject.AddComponent<DocheolHitRegions>();
+            regions.Configure(this,health,hurtCollider,GetComponentInChildren<DocheolVisual>());
+            hitRegions=regions;
+            UpdateHurtbox();
         }
         public void StartEncounter() => SetFightActive(true);
         public void SetEncounterEnabled(bool enabled) => SetFightActive(enabled);
@@ -174,9 +200,10 @@ namespace FourGuardians.BossFight
             fightActive = false; ClearRockfall();
             transform.position = new Vector3(position.x, FloorY, transform.position.z);
             Facing = TurnFromFacing = TurnToFacing = -1; Phase = 1; ArmorMask = 15; threshold75 = threshold60 = phasePending = false;
-            TurnCount = BackdashCount = RepositionCount = 0; nextBackdashTime = nextWholeTime = 0; preparedPlan = null;
+            decisionOpen=decisionTurnSpent=decisionMoveSpent=false;DecisionCount=RootBlockCount=MovementSegmentsThisDecision=TurnSegmentsThisDecision=0;PreparationSeconds=0;DecisionTargetX=position.x;
+            LockedAdvanceDistance=ComboAdvanceDistance=0;TurnCount = BackdashCount = RepositionCount = 0; nextBackdashTime = nextWholeTime = 0; preparedPlan = null;
             EntryRockfallUsed=LateRockfallUsed=LateRockfallPending=false;RockfallEventCount=WholeBodyAttackCount=0;
-            WholeFirstSide=WholeSwingSide=-1;SecondaryWarningBounds=default;wholeSecondIdAllocated=false;
+            WholeFirstSide=WholeSwingSide=-1;SecondaryWarningBounds=default;allocatedWholeIndex=0;WholeContactIndex=0;
             LastHitRegion = -1; LastHitPoint = position; encounterTime = nextBurrowTime = nextRockfallTime = 0f;
             rockSequence = completedSequences = RejectedRockfallPlacements = 0;
             rockRandom = new System.Random(rockfallSeed); rockSizeDraws.Clear();
@@ -234,9 +261,13 @@ namespace FourGuardians.BossFight
             if (!ControlsLocked) TickRockfall(dt);
             if (!fightActive || player.IsDead || health.IsDead) return;
             // A threshold never cancels an advertised attack package or recovery.
-            if (phasePending && (State == BossState.Idle || State == BossState.Waiting)) BeginTransition();
+            if (phasePending && (State == BossState.Idle || State == BossState.Waiting || State == BossState.ActionWait)) BeginTransition();
             switch (State)
             {
+                case BossState.ActionWait:
+                    SetStage("action_wait",StateProgress);
+                    if(timer>=duration)SelectPattern();
+                    break;
                 case BossState.Idle:
                     SetStage("idle", StateProgress);
                     if (timer >= duration) SelectPattern();
@@ -248,7 +279,7 @@ namespace FourGuardians.BossFight
                 case BossState.Reposition:
                 case BossState.Backdash:
                     SetStage(State == BossState.Backdash ? "backdash" : "reposition", StateProgress);
-                    TickSpacing(dt);
+                    PreparationSeconds+=dt; TickSpacing(dt);
                     if (timer >= duration) { SetState(BossState.Settling, settleDuration); SetStage("settle", 0); }
                     break;
                 case BossState.Settling:
@@ -274,7 +305,7 @@ namespace FourGuardians.BossFight
                     break;
                 case BossState.Recovery:
                     SetStage("recover", StateProgress);
-                    if (timer >= duration) { BurrowPackageActive = false; SelectPattern(); }
+                    if (timer >= duration) { BurrowPackageActive = false; decisionOpen=false; Pattern=BossPattern.None;TargetLocked=false;ClearCombo();SetState(BossState.ActionWait,PhaseActionWait);SetStage("action_wait",0); }
                     break;
                 case BossState.Transition:
                     TickTransition();
@@ -284,36 +315,39 @@ namespace FourGuardians.BossFight
         }
         private bool PreparePosition()
         {
-            float dx = player.HurtBounds.center.x - transform.position.x;
-            int desired = Mathf.Abs(dx) > .12f ? (dx > 0 ? 1 : -1) : Facing;
-            if (desired != Facing)
+            // One observation and at most one turn + one movement per decision.
+            // Settling resumes this committed decision, never a fresh pursuit loop.
+            float dx=DecisionTargetX-transform.position.x;
+            int desired=Mathf.Abs(dx)>.12f?(dx>0?1:-1):Facing;
+            if(desired!=Facing && !decisionTurnSpent)
             {
-                ClearBounds(); HideMarkers(); Pattern=BossPattern.None; TargetLocked=false;
-                TurnFromFacing=Facing; TurnToFacing=desired; TurnCount++;
-                SetState(BossState.Turning,turnDuration); SetStage("turn",0); return false;
+                decisionTurnSpent=true;TurnSegmentsThisDecision++;TurnFromFacing=Facing;TurnToFacing=desired;TurnCount++;
+                ClearBounds();HideMarkers();Pattern=BossPattern.None;TargetLocked=false;
+                SetState(BossState.Turning,turnDuration);SetStage("turn",0);return false;
             }
+            if(decisionMoveSpent)return true;
+            decisionMoveSpent=true;
             float distance=Mathf.Abs(dx);
-            if (distance >= 1.35f && distance <= 3.35f) return true;
-            float side = dx >= 0 ? -1 : 1;
-            float goal = ClampBodyX(player.HurtBounds.center.x + side * 2.55f);
-            // Preserve the current side. A clamped wall target cannot license crossing the player.
-            if ((goal-player.HurtBounds.center.x)*side < .4f) goal=transform.position.x;
+            // Use the effective paw reach, instead of the old narrow ideal-distance band.
+            if(distance>=1.05f && distance<=PawMaximumReach)return true;
+            float side=dx>=0?-1:1;
+            float goal=ClampBodyX(DecisionTargetX+side*2.55f);
+            if((goal-DecisionTargetX)*side<.4f)goal=transform.position.x;
             float available=Mathf.Abs(goal-transform.position.x);
-            if (available < .12f)
+            if(available<.12f)
             {
-                if (!RockfallActive && BurrowCooldownRemaining<=0 && !BurrowPackageActive)
-                { BeginSpecial(BossPattern.BBurrowLeap); return false; }
-                return true; // Select only an actually effective footprint below, or wait.
+                if(!RockfallActive && BurrowCooldownRemaining<=0 && !BurrowPackageActive)
+                {BeginSpecial(BossPattern.BBurrowLeap);return false;}
+                return true;
             }
-            bool retreat=distance<1.35f;
+            bool retreat=distance<1.05f;
             bool dash=retreat && BackdashCooldownRemaining<=0 && (distance<.65f || UnityEngine.Random.value<.40f);
-            float step=Mathf.Min(available,dash?1.65f:.95f);
+            float step=Mathf.Min(available,dash?1.65f:retreat?.95f:Phase==1?phaseOneApproachLimit:phaseTwoApproachLimit);
             spacingDestination=transform.position.x+Mathf.Sign(goal-transform.position.x)*step;
-            Pattern=BossPattern.None; TargetLocked=false; ClearBounds(); HideMarkers();
-            if(dash){nextBackdashTime=encounterTime+backdashCooldown;BackdashCount++;}
-            else RepositionCount++;
+            Pattern=BossPattern.None;TargetLocked=false;ClearBounds();HideMarkers();MovementSegmentsThisDecision++;
+            if(dash){nextBackdashTime=encounterTime+backdashCooldown;BackdashCount++;}else RepositionCount++;
             SetState(dash?BossState.Backdash:BossState.Reposition,step/(dash?backdashSpeed:repositionSpeed));
-            SetStage(dash?"backdash":"reposition",0); return false;
+            SetStage(dash?"backdash":"reposition",0);return false;
         }
         private void TickSpacing(float dt)
         {
@@ -342,12 +376,17 @@ namespace FourGuardians.BossFight
             if (phasePending) { preparedPlan=null; BeginTransition(); return; }
             if(Phase==2 && LateRockfallPending && !RockfallActive && !BurrowPackageActive)
             {LateRockfallPending=false;LateRockfallUsed=true;BeginSpecial(BossPattern.ARockfall);return;}
+            if(!decisionOpen)
+            {
+                decisionOpen=true;decisionTurnSpent=decisionMoveSpent=false;DecisionCount++;
+                DecisionTargetX=player.HurtBounds.center.x;MovementSegmentsThisDecision=TurnSegmentsThisDecision=0;
+            }
             if (!PreparePosition()) return;
             if (RockfallActive && !EscapePreviewAvailable) { WaitForSafePattern("player_action_locked"); return; }
             if (!string.IsNullOrEmpty(preparedPlan))
             {
                 string plan=preparedPlan;
-                if (EffectiveBasic(plan) && (!RockfallActive || FindTimedEscape(default,false,0,plan,false)))
+                if ((!RockfallActive || EffectiveBasic(plan)) && (!RockfallActive || FindTimedEscape(default,false,0,plan,false)))
                 { preparedPlan=null; BeginCombo(plan); return; }
                 WaitForSafePattern("prepared_followup_not_yet_valid"); return;
             }
@@ -356,17 +395,23 @@ namespace FourGuardians.BossFight
             for(int i=0;i<candidates.Length;i++)
             {
                 string code=candidates[i];
-                float weight=code=="3-2"?(Phase==2?2.5f:1.1f):1.25f;
+                float weight=code=="3-2"?(Phase==2?3.25f:.32f):(Phase==2?1.1f:1.35f);
                 foreach(string prior in recentStarts)if(prior==code)weight*=.55f;
                 if(!EffectiveBasic(code) || RockfallActive && !FindTimedEscape(default,false,0,code,false))weight=0;
                 weights[i]=weight;total+=weight;
             }
             if(string.IsNullOrEmpty(preparedPlan) && !RockfallActive && !BurrowPackageActive && BurrowCooldownRemaining<=0 && completedSequences>=2)
                 weights[candidates.Length]=.40f;
-            if(string.IsNullOrEmpty(preparedPlan) && Phase==2 && !RockfallActive && !BurrowPackageActive && encounterTime>=nextWholeTime)
+            if(string.IsNullOrEmpty(preparedPlan) && Phase==2 && !RockfallActive && !BurrowPackageActive && encounterTime>=nextWholeTime && WholeBodyCanThreatenPlayer())
                 weights[candidates.Length+1]=.65f;
             total+=weights[candidates.Length]+weights[candidates.Length+1];
-            if(total<.0001f){WaitForSafePattern("no_effective_verified_attack");return;}
+            if(total<.0001f)
+            {
+                // A crossing/running player cannot buy endless new turns or approach segments.
+                // Threaten the committed front with an existing sweep, then wait normally.
+                if(!RockfallActive){BeginCombo("2");return;}
+                WaitForSafePattern("no_effective_verified_attack");return;
+            }
             float draw=UnityEngine.Random.value*total;
             for(int i=0;i<weights.Length;i++)
             {
@@ -389,7 +434,7 @@ namespace FourGuardians.BossFight
         private void BeginCombo(string code)
         {
             // Entire chain is selected before its first tell. Inputs never create or cancel followups.
-            ComboCode = code; ComboIndex = 0;
+            decisionOpen=false; ComboAdvanceDistance=0; ComboCode = code; ComboIndex = 0;
             string[] steps = code.Split('-'); combo = new BossPattern[steps.Length];
             for (int i = 0; i < steps.Length; i++) combo[i] = steps[i] == "3" ? BossPattern.DT03Bite : BossPattern.DT02Sweep;
             RememberStart(code); BeginBasic(combo[0]);
@@ -398,16 +443,19 @@ namespace FourGuardians.BossFight
         {
             HideMarkers(); ClearBounds(); Pattern = pattern; AttackId = ++nextAttackId;
             TargetLocked = true; landed = false; riseOrigin = transform.position; motionEndX = transform.position.x;
+            float requested=pattern==BossPattern.DT03Bite?biteAdvance:sweepAdvance;
+            float remaining=Mathf.Max(0,comboAdvanceLimit-ComboAdvanceDistance);
+            motionEndX=ClampBodyX(riseOrigin.x+Facing*Mathf.Min(requested,remaining));
+            LockedAdvanceDistance=Mathf.Abs(motionEndX-riseOrigin.x);ComboAdvanceDistance+=LockedAdvanceDistance;
             float tell;
             if (pattern == BossPattern.DT03Bite)
             {
-                TargetX = transform.position.x + Facing * 2.2f;
-                WarningBounds = Box(TargetX, FloorY + 0.9f, 2.6f, 1.8f); tell = biteTell;
+                TargetX = motionEndX + Facing * 2.2f;
+                WarningBounds = Box((riseOrigin.x+motionEndX)*.5f+Facing*2.2f, FloorY + 0.9f, 2.6f+LockedAdvanceDistance, 1.8f); tell = biteTell;
             }
             else if (pattern == BossPattern.DT02Sweep)
             {
-                // This preselected chain uses the same fixed root; no late player tracking.
-                if (IsComboFollowup) motionEndX = ClampBodyX(transform.position.x + Facing * sweepComboAdvance);
+                // Short weight transfer is committed now; the entire chain advances <=.50 units.
                 TargetX = motionEndX + Facing * ((PawMinimumReach + PawMaximumReach)*.5f);
                 WarningBounds = Box(TargetX, FloorY + 0.30f, PawMaximumReach-PawMinimumReach, 0.60f);
                 tell = IsComboFollowup ? sweepFollowupTell : sweepTell;
@@ -421,7 +469,7 @@ namespace FourGuardians.BossFight
         {
             ClearCombo(); HideMarkers(); ClearBounds();
             transform.position = new Vector3(ClampBodyX(transform.position.x), FloorY, transform.position.z);
-            Pattern = pattern; AttackId = ++nextAttackId; riseOrigin = transform.position;
+            decisionOpen=false; Pattern = pattern; AttackId = ++nextAttackId; riseOrigin = transform.position;
             TargetLocked = false; LockedTellDuration = 0f; landed = false;
             RememberStart(pattern == BossPattern.ARockfall ? "A" : "B");
             if (pattern == BossPattern.ARockfall)
@@ -451,8 +499,6 @@ namespace FourGuardians.BossFight
             if (Pattern != BossPattern.BBurrowLeap)
             {
                 SetStage("tell", StateProgress);
-                if (Pattern == BossPattern.DT02Sweep && IsComboFollowup)
-                    transform.position = new Vector3(Mathf.Lerp(riseOrigin.x, motionEndX, Mathf.SmoothStep(0f, 1f, StateProgress)), FloorY, riseOrigin.z);
                 AnimateWarning(); return;
             }
             if (timer < submergeDuration)
@@ -491,9 +537,9 @@ namespace FourGuardians.BossFight
         }
         private void BeginWholeBodyBite()
         {
-            ClearCombo();HideMarkers();ClearBounds();Pattern=BossPattern.WholeBodyBite;AttackId=++nextAttackId;
-            WholeFirstSide=WholeSwingSide=Facing;WholeBodyAttackCount++;wholeSecondIdAllocated=false;
-            wholeFirstBounds=WholeBounds(Facing);wholeSecondBounds=WholeBounds(-Facing);
+            decisionOpen=false;ClearCombo();HideMarkers();ClearBounds();Pattern=BossPattern.WholeBodyBite;AttackId=++nextAttackId;
+            WholeFirstSide=WholeSwingSide=-1;WholeBodyAttackCount++;allocatedWholeIndex=0;WholeContactIndex=0;
+            wholeFirstBounds=WholeBounds(-1);wholeSecondBounds=WholeBounds(1);
             WarningBounds=wholeFirstBounds;SecondaryWarningBounds=wholeSecondBounds;TargetX=wholeFirstBounds.center.x;TargetLocked=true;
             nextWholeTime=encounterTime+wholeCooldown;LockedTellDuration=wholeTell;
             SetState(BossState.Telegraph,wholeTell);SetStage("whole_tell",0);ShowWarning();
@@ -502,34 +548,59 @@ namespace FourGuardians.BossFight
         }
         private Bounds WholeBounds(int side)
         {
-            float center=transform.position.x+side*2.85f;
-            float left=Mathf.Max(ArenaLeft,center-1.65f),right=Mathf.Min(ArenaRight,center+1.65f);
-            return Box((left+right)*.5f,FloorY+.6f,right-left,1.2f);
+            // Floor projection of the moving body/mouth, including the central body strike.
+            Bounds b=DocheolWholeMotion.Bounds(new Vector2(transform.position.x,FloorY),side,1);
+            float left=Mathf.Max(ArenaLeft,b.min.x),right=Mathf.Min(ArenaRight,b.max.x);
+            return Box((left+right)*.5f,FloorY+.65f,right-left,1.3f);
+        }
+        private bool WholeBodyCanThreatenPlayer()
+        {
+            Bounds hurt=player.HurtBounds;
+            Bounds left=WholeBounds(-1),right=WholeBounds(1);
+            return hurt.max.x>left.min.x && hurt.min.x<left.max.x || hurt.max.x>right.min.x && hurt.min.x<right.max.x;
         }
         private void TickWholeBodyBite()
         {
-            float firstEnd=wholeArc+wholeContact,secondStart=firstEnd+wholeBridge;
-            if(timer<firstEnd)
+            float strike=wholeArc+wholeContact, fast= strike+wholeBridge;
+            float fifthStart=3*fast+strike+wholeFinalDelay;
+            int index;float elapsed;
+            if(timer<fifthStart){index=Mathf.Min(3,Mathf.FloorToInt(timer/fast));elapsed=timer-index*fast;}
+            else{index=4;elapsed=timer-fifthStart;}
+            bool preparing=elapsed>=strike;
+            int next=preparing?index+1:index;
+            if(next!=allocatedWholeIndex)
             {
-                WholeSwingSide=WholeFirstSide;
-                if(timer<wholeArc){SetStage("whole_arc",timer/wholeArc);AnimateWarning();return;}
-                if(AttackStage!="whole_hit")Cue("whole_bite",new Vector2(wholeFirstBounds.center.x,FloorY),1);
-                SetStage("whole_hit",(timer-wholeArc)/wholeContact);ActiveBounds=wholeFirstBounds;
+                allocatedWholeIndex=next;AttackId=++nextAttackId;HideMarkers();
+                int nextSide=next%2==0?-1:1;
+                WarningBounds=nextSide<0?wholeFirstBounds:wholeSecondBounds;SecondaryWarningBounds=nextSide<0?wholeSecondBounds:wholeFirstBounds;TargetX=WarningBounds.center.x;ShowWarning();
+                Cue("whole_shift",new Vector2(TargetX,FloorY),next==4?wholeFinalDelay:wholeBridge);
             }
-            else if(timer<secondStart)
+            WholeSwingSide=next%2==0?-1:1;WholeContactIndex=index;
+            if(preparing)
             {
-                if(!wholeSecondIdAllocated)
-                {wholeSecondIdAllocated=true;AttackId=++nextAttackId;HideMarkers();WarningBounds=wholeSecondBounds;TargetX=wholeSecondBounds.center.x;ShowWarning();Cue("whole_shift",new Vector2(TargetX,FloorY),wholeBridge);}
-                WholeSwingSide=-WholeFirstSide;SetStage("whole_cross",(timer-firstEnd)/wholeBridge);AnimateWarning();return;
+                float wait=index==3?wholeFinalDelay:wholeBridge;
+                SetStage(index==3?"whole_final_windup":"whole_cross",(elapsed-strike)/wait);AnimateWarning();return;
             }
-            else
+            if(elapsed<wholeArc)
             {
-                WholeSwingSide=-WholeFirstSide;float secondTime=timer-secondStart;
-                if(secondTime<wholeArc){SetStage("whole_arc",secondTime/wholeArc);AnimateWarning();return;}
-                if(AttackStage!="whole_hit")Cue("whole_bite",new Vector2(wholeSecondBounds.center.x,FloorY),1);
-                SetStage("whole_hit",(secondTime-wholeArc)/wholeContact);ActiveBounds=wholeSecondBounds;
+                SetStage("whole_arc",elapsed/wholeArc);AnimateWarning();
+                // The last half of the real downswing can hit airborne overlap, sharing this contact ID.
+                if(AttackStageProgress>=.5f)WholeDamage(AttackStageProgress);
+                return;
             }
-            DrawAttackEffect(ActiveBounds);DamageVolume(ActiveBounds,AttackId);
+            if(AttackStage!="whole_hit")Cue("whole_bite",new Vector2(TargetX,FloorY),1);
+            SetStage("whole_hit",(elapsed-wholeArc)/wholeContact);WholeDamage(1);
+        }
+        private void WholeDamage(float downswing)
+        {
+            Vector2 root=new Vector2(transform.position.x,FloorY);
+            ActiveBounds=DocheolWholeMotion.Bounds(root,WholeSwingSide,downswing);
+            DrawAttackEffect(WholeSwingSide<0?wholeFirstBounds:wholeSecondBounds);
+            // Bounds are presentation/debug envelopes; damage is the rounded anatomical chain.
+            if(DocheolWholeMotion.Intersects(root,WholeSwingSide,downswing,player.HurtBounds))
+            {
+                if(player.ReceiveAttack(AttackId,1,new Vector2(WholeSwingSide*4f,2.7f),gameObject))PlayerDamagedByAttack?.Invoke(AttackId);
+            }
         }
         private void BeginActive()
         {
@@ -539,7 +610,7 @@ namespace FourGuardians.BossFight
                 Cue("roar", transform.position, roarDuration); return;
             }
             if(Pattern==BossPattern.WholeBodyBite)
-            {SetState(BossState.Active,2*(wholeArc+wholeContact)+wholeBridge);SetStage("whole_arc",0);return;}
+            {SetState(BossState.Active,5*(wholeArc+wholeContact)+3*wholeBridge+wholeFinalDelay);SetStage("whole_arc",0);return;}
             if (Pattern == BossPattern.BBurrowLeap)
             {
                 if (!TargetLocked) LockLeapLanding();
@@ -557,7 +628,15 @@ namespace FourGuardians.BossFight
             if(Pattern==BossPattern.WholeBodyBite){TickWholeBodyBite();return;}
             if (Pattern != BossPattern.BBurrowLeap)
             {
-                SetStage("strike", StateProgress); ActiveBounds = WarningBounds;
+                SetStage("strike", StateProgress);
+                transform.position=new Vector3(Mathf.Lerp(riseOrigin.x,motionEndX,Mathf.SmoothStep(0,1,Mathf.Clamp01(StateProgress/.45f))),FloorY,riseOrigin.z);
+                if(Pattern==BossPattern.DT02Sweep)
+                {
+                    float inner=Facing<0?WarningBounds.max.x:WarningBounds.min.x,outer=Facing<0?WarningBounds.min.x:WarningBounds.max.x;
+                    float hoof=Mathf.Lerp(inner+Facing*.55f,outer-Facing*.55f,Mathf.SmoothStep(0,1,StateProgress));
+                    ActiveBounds=Box(hoof,FloorY+.30f,1.10f,.60f);
+                }
+                else ActiveBounds=Box(transform.position.x+Facing*2.2f,FloorY+.9f,2.6f,1.8f);
                 DrawAttackEffect(ActiveBounds); DamageVolume(ActiveBounds, AttackId); return;
             }
             if (timer < leapFlightTime)
@@ -616,7 +695,7 @@ namespace FourGuardians.BossFight
             transform.position = new Vector3(transform.position.x, FloorY, transform.position.z);
             HideMarkers(); ClearBounds();
             if (Pattern == BossPattern.ARockfall) { completedSequences++;StartRockfallWindow();SetState(BossState.Idle,.35f);return; }
-            if(Pattern==BossPattern.WholeBodyBite)Facing=-WholeFirstSide;
+            if(Pattern==BossPattern.WholeBodyBite)Facing=-1;
             if (Pattern == BossPattern.BBurrowLeap && BurrowExitPlan != "rest")
             {
                 completedSequences++;
@@ -856,9 +935,10 @@ namespace FourGuardians.BossFight
         private void AddFutureDanger(BossPattern step,bool followup,ref float originX,ref float cursor)
         {
             bool sweep=step==BossPattern.DT02Sweep;
-            if(sweep && followup)originX=ClampBodyX(originX+Facing*sweepComboAdvance);
+            float initialOrigin=originX;
+            originX=ClampBodyX(originX+Facing*(sweep?sweepAdvance:biteAdvance));
             Bounds bounds=sweep?Box(originX+Facing*((PawMinimumReach+PawMaximumReach)*.5f),FloorY+.3f,PawMaximumReach-PawMinimumReach,.6f)
-                :Box(originX+Facing*2.2f,FloorY+.9f,2.6f,1.8f);
+                :Box((initialOrigin+originX)*.5f+Facing*2.2f,FloorY+.9f,2.6f+Mathf.Abs(originX-initialOrigin),1.8f);
             float tell=sweep?(followup?sweepFollowupTell:sweepTell):biteTell,strike=sweep?sweepStrike:biteStrike;
             routeDangers.Add(new TimedDanger{bounds=bounds,start=cursor+tell,end=cursor+tell+strike,sweep=sweep,basic=true});
             cursor+=tell+strike+comboLink;
@@ -946,7 +1026,9 @@ namespace FourGuardians.BossFight
         private void UpdateHurtbox()
         {
             if (hurtRoot == null) return;
-            hurtRoot.localPosition = new Vector3(Facing * 0.4f, 0.95f, 0f);
+            // The partition owns the collider's painted-front pose even during a committed
+            // whole-body swing/turn. Do not undo that alignment every physics tick.
+            if(hitRegions==null)hurtRoot.localPosition = new Vector3(Facing * 0.4f, 0.95f, 0f);
             weakPoint.transform.localPosition = new Vector3(Facing * 1.25f, -0.91f, 0f);
             bool grounded = Mathf.Abs(transform.position.y - FloorY) <= 0.25f;
             bool vulnerable = fightActive && State != BossState.Transition && State != BossState.Dead && grounded && !IsUnderground;

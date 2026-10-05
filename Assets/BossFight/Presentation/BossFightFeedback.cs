@@ -233,6 +233,9 @@ namespace FourGuardians.BossFight
                     Play("bite",position,.82f);Play("wood",position,.40f);Shake(.09f*amount,.12f);Burst(position,7,new Color(.54f,.44f,.28f),.55f);break;
                 case "whole_shift":Play("wood",position,.35f);break;
                 case "phase_roar":Play("roar",position,.80f);break;
+                case "root_block":
+                    // Small dry deflection: no damage confirmation, hit stop or camera shake.
+                    Play("wood",position,.23f);Burst(position,2,new Color(.70f,.73f,.66f),.16f);break;
                 case "recover": break;
                 case "phase":
                     Play("phase", position, 0.70f);

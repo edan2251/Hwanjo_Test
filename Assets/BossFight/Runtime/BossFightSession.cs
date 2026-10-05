@@ -38,6 +38,7 @@ namespace FourGuardians.BossFight
         public float CameraShake => feedback != null ? feedback.ShakeScale : 0f;
         public string LastCue => lastCue;
         public float CueAge => Time.unscaledTime - cueTime;
+        public float LastRootDeflectTime { get; private set; } = -100f;
         public bool IsQaContracts { get; private set; }
         public bool IntroComplete { get; private set; }
         public float IntroProgress => Mathf.Clamp01(introTime / IntroDuration);
@@ -63,7 +64,7 @@ namespace FourGuardians.BossFight
                 if (args[i] == "-bossqa" && i + 1 < args.Length)
                 {
                     IsQaContracts = args[i + 1] == "contracts" || args[i + 1] == "v3contracts";
-                    qaIntro = args[i + 1] == "intro" || args[i + 1] == "v3intro" || args[i + 1] == "observe" || args[i + 1] == "v4observe";
+                    qaIntro = args[i + 1] == "intro" || args[i + 1] == "v3intro" || args[i + 1] == "observe" || args[i + 1] == "v4observe" || args[i + 1] == "v5observe";
                 }
                 if (args[i] == "-bossqa-fps" && i + 1 < args.Length && int.TryParse(args[i + 1], out int fps))
                     Application.targetFrameRate = Mathf.Clamp(fps, 15, 240);
@@ -230,6 +231,7 @@ namespace FourGuardians.BossFight
         private void OnBossCue(string cue, Vector2 position, float strength)
         {
             lastCue = cue; cueTime = Time.unscaledTime;
+            if(cue=="root_block"){LastRootDeflectTime=Time.unscaledTime;bossVisual?.OnRootBlocked();}
             if (cue != "armor_break") feedback?.PlayCue(cue, position, strength);
         }
         private void OnArmorBroken(int index, int mask, Vector2 point)

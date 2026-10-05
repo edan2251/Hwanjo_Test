@@ -22,6 +22,7 @@ namespace FourGuardians.BossFight
             public string specVersion="docheol-root-reach-v4",mode,utc,unityVersion,assembly,inputStrategy;
             public bool passed,usesControlledSetup,usesSyntheticDamage,usesForcedPatterns,usesTestRepositioning,usesApiRetry,usesModifiedInvulnerability=false;
             public int requestedFps,renderedFrames; public float seconds,averageFps;
+            public List<V5Stats> phaseStats=new List<V5Stats>();
             public List<Check> checks=new List<Check>();
             public List<Case> cases=new List<Case>();
             public List<string> events=new List<string>(),errors=new List<string>(),screenshots=new List<string>();
@@ -43,7 +44,7 @@ namespace FourGuardians.BossFight
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
         {
-            if(!Arg("-bossqa").StartsWith("v4") || FindFirstObjectByType<DocheolV4QaDriver>()!=null)return;
+            if(!(Arg("-bossqa").StartsWith("v4") || Arg("-bossqa").StartsWith("v5")) || FindFirstObjectByType<DocheolV4QaDriver>()!=null)return;
             DontDestroyOnLoad(new GameObject("Docheol V4 QA").AddComponent<DocheolV4QaDriver>().gameObject);
         }
         private IEnumerator Start()
@@ -52,11 +53,12 @@ namespace FourGuardians.BossFight
             QualitySettings.vSyncCount=0;Application.targetFrameRate=fps;Application.runInBackground=true;
             report=new Report{mode=Arg("-bossqa"),utc=DateTime.UtcNow.ToString("o"),unityVersion=Application.unityVersion,
                 assembly=typeof(DoCheolBossController).Assembly.ManifestModule.ModuleVersionId.ToString(),requestedFps=fps,
-                inputStrategy=Arg("-bossqa")=="v4observe"?"passive physical keyboard observer":"ordinary input bot; .2s basic recognition; current geometry and timed rock route API",
+                inputStrategy=Arg("-bossqa").EndsWith("observe")?"passive physical keyboard observer":"ordinary input bot; .2s basic recognition; current geometry and timed rock route API",
                 usesApiRetry=Arg("-bossqa")=="v4death",
-                usesControlledSetup=Arg("-bossqa")!="v4observe"&&Arg("-bossqa")!="v4natural"&&Arg("-bossqa")!="v4death",
-                usesTestRepositioning=Arg("-bossqa")!="v4observe"&&Arg("-bossqa")!="v4natural"&&Arg("-bossqa")!="v4death",
+                usesControlledSetup=!Arg("-bossqa").EndsWith("observe")&&Arg("-bossqa")!="v4natural"&&Arg("-bossqa")!="v4death",
+                usesTestRepositioning=!Arg("-bossqa").EndsWith("observe")&&Arg("-bossqa")!="v4natural"&&Arg("-bossqa")!="v4death",
                 usesForcedPatterns=Arg("-bossqa")=="v4core"||Arg("-bossqa")=="v4burrow"||Arg("-bossqa")=="v4whole"||Arg("-bossqa")=="v4phase"};
+            if(report.mode.StartsWith("v5")){report.specVersion="docheol-root-rhythm-v5";report.usesSyntheticDamage=report.mode=="v5rhythm"||report.mode=="v5scenarios";report.usesModifiedInvulnerability=report.mode=="v5rhythm"||report.mode=="v5scenarios";report.usesForcedPatterns=report.mode=="v5roots";if(report.mode=="v5roots")report.inputStrategy="fixed idle boss pose, initial facing forced; actual ordinary sword; no synthetic damage";}
             output=Arg("-bossqa-output",Path.Combine(Application.persistentDataPath,"v4qa.json"));
             captureDirectory=Arg("-bossqa-capture");Application.logMessageReceived+=Log;
             started=Time.realtimeSinceStartup;firstFrame=Time.frameCount;
@@ -65,11 +67,16 @@ namespace FourGuardians.BossFight
             if(session==null || player==null || boss==null){Record("setup",false,"missing encounter objects");yield return Finish();yield break;}
             player.Damaged+=OnDamaged;
             boss.PlayerDamagedByAttack+=OnDamageSource;
-            if(report.mode=="v4observe")yield return Observe();
+            if(report.mode.EndsWith("observe"))yield return Observe();
             else
             {
                 session.StartFight();player.SetExternalInput(true);yield return null;
-                if(report.mode=="v4core")yield return Core();
+                if(report.mode=="v5roots")yield return V5Roots();
+                else if(report.mode=="v5whole"){report.usesForcedPatterns=true;report.usesSyntheticDamage=true;yield return V5WholeMatrix();}
+                else if(report.mode=="v5advance"){report.usesForcedPatterns=true;yield return V5AdvanceMatrix();}
+                else if(report.mode=="v5rhythm")yield return V5Rhythm();
+                else if(report.mode=="v5scenarios")yield return V5Scenarios();
+                else if(report.mode=="v4core")yield return Core();
                 else if(report.mode=="v4burrow")yield return BurrowMatrix();
                 else if(report.mode=="v4whole")yield return WholeMatrix();
                 else if(report.mode=="v4phase")yield return PhaseEvents();
@@ -94,7 +101,7 @@ namespace FourGuardians.BossFight
         }
         private void OnGUI()
         {
-            if(report!=null && report.usesControlledSetup)GUI.Box(new Rect(12,137,Screen.width-24,27),"QA CONTROLLED SETUP | ordinary player input after initial pose/plan; see JSON for synthetic phase setup.");
+            if(report!=null && report.usesControlledSetup)GUI.Box(new Rect(12,137,Screen.width-24,27),report.mode=="v5roots"?"QA FIXED IDLE/WHOLE CONTACT POSE | ordinary sword; body/root partition; no difficulty measurement.":"QA CONTROLLED SETUP | ordinary player input after initial pose/plan; see JSON for synthetic phase setup.");
         }
         private void FixedUpdate()
         {
@@ -114,6 +121,10 @@ namespace FourGuardians.BossFight
         }
         private void Capture(string label)
         {
+            // Keep focused temporal evidence; the regression assertions do not need every
+            // intermediate posture of every naturally selected package as another PNG.
+            if(report.mode=="v4natural" && label.StartsWith("natural-P") && !(label.EndsWith("-tell")||label.EndsWith("-whole_tell")||label.EndsWith("-whole_final_windup")||label.EndsWith("-whole_hit")||label.EndsWith("-recover")||label.EndsWith("-phase_roar")||label.EndsWith("-land")||label.EndsWith("-wave")))return;
+            if(report.mode=="v4burrow" && !(label.EndsWith("-rise")||label.EndsWith("-flight")||label.EndsWith("-land")||label.EndsWith("-wave")||label.EndsWith("-followup")||label.EndsWith("-result")))return;
             // Unity retains one native screenshot request per frame. Defer duplicate labels
             // rather than report files that the renderer will never write.
             if(Application.isBatchMode || string.IsNullOrEmpty(captureDirectory) || captures.Contains(label) || captures.Count>=80 || lastCaptureFrame==Time.frameCount)return;
@@ -253,16 +264,16 @@ namespace FourGuardians.BossFight
                     {player=nextPlayer;player.Damaged+=OnDamaged;}
                     yield return null;continue;
                 }
-                string state=session.State+"/"+boss.Phase+"/"+boss.State+"/"+boss.ComboCode+"/"+boss.AttackStage+"/"+player.Movement.Action+"/attack="+player.Movement.AttackSequence;
+                string state=session.State+"/"+boss.Phase+"/"+boss.State+"/"+boss.ComboCode+"/"+boss.AttackStage+"/"+player.Movement.Action+"/attack="+player.Movement.AttackSequence+"/roots="+boss.RootBlockCount;
                 if(state!=prior){report.events.Add("observe "+(Time.realtimeSinceStartup-started).ToString("F2")+" "+state+" px="+player.Body.position.x.ToString("F2")+" hp="+player.Health.CurrentHealth+" bossHp="+boss.Health.CurrentHealth);prior=state;}
-                if(Time.realtimeSinceStartup>=next){next=Time.realtimeSinceStartup+3;Capture("observe-"+captures.Count);}
+                if(Time.realtimeSinceStartup>=next){next=Time.realtimeSinceStartup+30;Capture("observe-"+captures.Count);}
                 yield return null;
             }
             Record("physical_input_observer",true,"no input submission, forced pattern, health mutation or teleport");
         }
         private IEnumerator Finish()
         {
-            if(report.mode!="v4observe")player?.SubmitInput(0,false,false,false);
+            if(!report.mode.EndsWith("observe"))player?.SubmitInput(0,false,false,false);
             yield return null;if(!Application.isBatchMode)yield return new WaitForEndOfFrame();yield return null;
             Record("no_runtime_errors",report.errors.Count==0,"errors="+report.errors.Count);
             bool native=!Application.isBatchMode&&!string.IsNullOrEmpty(captureDirectory)&&report.screenshots.Count>0;

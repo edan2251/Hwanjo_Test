@@ -31,6 +31,18 @@ namespace FourGuardians.BossFight
         public void SetTurnState(bool active,float progress,int from,int to)
         {turning=active;turnProgress=Mathf.Clamp01(progress);turnFrom=from;turnTo=to;}
         private bool mainVisible = true;
+        private float rootDeflectUntil;
+        public void OnRootBlocked(){rootDeflectUntil=Time.time+.10f;}
+        public bool TryGetDamageArtBounds(out Bounds solid,out Bounds fan)
+        {
+            solid=fan=default;if(body==null || roots==null || body.graphics.Count==0 || roots.graphics.Count==0)return false;
+            solid=body.graphics[0].bounds;foreach(var sr in body.graphics)solid.Encapsulate(sr.bounds);
+            // Preserve painted body/forepaws/jaw at their overlap with the root fan.
+            foreach(var part in new[]{nearPaw,farPaw,jaw,mouth})if(part!=null)foreach(var sr in part.graphics)solid.Encapsulate(sr.bounds);
+            // Attached body armor remains a valid target even where it overhangs the ivory body.
+            foreach(var part in armorParts)if(part!=null)foreach(var sr in part.graphics)if(sr.enabled)solid.Encapsulate(sr.bounds);
+            fan=roots.graphics[0].bounds;foreach(var sr in roots.graphics)fan.Encapsulate(sr.bounds);return true;
+        }
         private sealed class PlateDebris
         {
             public Transform transform;
@@ -265,6 +277,7 @@ namespace FourGuardians.BossFight
             if(turning && HasV2Artwork) ApplyTurnPose();
             else if(move=="WHOLEBODYBITE" && HasV2Artwork)ApplyWholeBodyPose(state);
             else AlignAttackLimbs(move, state);
+            if(roots!=null && Time.time<rootDeflectUntil)Shift(roots,Mathf.Sin((rootDeflectUntil-Time.time)*100f)*.025f,0);
             ApplyDeath();
             ApplyVisibility();
             ApplyColors();
@@ -290,11 +303,27 @@ namespace FourGuardians.BossFight
         {
             string step=presentationAttackStage;float p=presentationAttackProgress;
             float sign=-wholeSide,angle=wholeSide*30f,lift=0;
-            if(step=="whole_tell")angle=wholeFirst*30f*Ease(p);
-            else if(step=="whole_arc")angle=Mathf.Lerp(wholeSide*30f,-wholeSide*30f,Ease(p));
+            if(step=="whole_tell")
+            {
+                angle=wholeFirst*30f*Ease(p);
+                if(lastFacing>0)
+                {
+                    // A world-left first strike still earns a visible committed preparation
+                    // when the previous pose faces right. No instant full-body mirror.
+                    float retract=Mathf.Clamp01(p/.32f);
+                    sign=-lastFacing*Mathf.Cos(Mathf.PI*retract);lift=Mathf.Sin(Mathf.PI*retract)*.20f;
+                }
+            }
+            else if(step=="whole_arc")angle=DocheolWholeMotion.Angle(wholeSide,p);
             else if(step=="whole_hit")angle=-wholeSide*30f;
-            else if(step=="whole_cross")
-            {sign=-wholeFirst*Mathf.Cos(Mathf.PI*p);angle=-wholeFirst*30f;lift=Mathf.Sin(Mathf.PI*p)*.25f;}
+            else if(step=="whole_cross" || step=="whole_final_windup")
+            {
+                // Retract/turn early, then hold the reared left-side preparation visibly.
+                // Spending the entire delayed beat edge-on would hide the creature's intent.
+                float cross=step=="whole_final_windup"?Mathf.Clamp01(p/.30f):p;
+                sign=wholeSide*Mathf.Cos(Mathf.PI*cross);angle=wholeSide*30f;
+                lift=Mathf.Sin(Mathf.PI*cross)*.25f+(step=="whole_final_windup"?Mathf.Sin(Mathf.PI*p)*.15f:0);
+            }
             else if(state=="recovery"){sign=-lastFacing;angle=-lastFacing*30f*(1-Ease(Mathf.Clamp01(p/.55f)));}
             rig.localPosition=Vector3.zero;rig.localScale=Vector3.one;
             ResetPart(body);ResetPart(roots);roots.joint.localPosition=new Vector3(0,roots.restPosition.y,0);roots.joint.localScale=new Vector3(sign,1,1);
@@ -338,13 +367,14 @@ namespace FourGuardians.BossFight
                 Shift(nearPaw,(-.6f-2.6f*sweep)*tension,-.04f*tension);
                 Rotate(nearPaw,(-5f+10f*sweep)*tension);
                 Shift(farPaw,-.18f*sweep*tension,0f);
+                Shift(body,-.12f*tension,-.045f*tension);
                 Rotate(body,1.5f*tension); Scale(roots,1f+.06f*tension,1f-.04f*tension);
             }
             else if (move.StartsWith("DT03"))
             {
                 float gape = tension*(1f-impact);
                 // Expand the throat, then snap the jaw upward without lifting the boss off the floor.
-                Shift(body,-.50f*impact*tension,.11f*gape);
+                Shift(body,-.22f*impact*tension+.10f*gape,.11f*gape);
                 Shift(jaw,-.08f*gape,.28f*impact*tension);
                 Rotate(jaw,13f*gape-9f*impact*tension);
                 Scale(jaw,1f,1f-.12f*impact*tension);
@@ -427,7 +457,7 @@ namespace FourGuardians.BossFight
             }
             else if (move.StartsWith("DT02"))
             {
-                Bounds footprint=strike && attackActive.size.x>0f?attackActive:attackWarning;
+                Bounds footprint=attackWarning;
                 float inner=lastFacing<0f?footprint.max.x:footprint.min.x;
                 float outer=lastFacing<0f?footprint.min.x:footprint.max.x;
                 float travel=strike?Ease(p):recover?1f:0f;
@@ -802,7 +832,7 @@ namespace FourGuardians.BossFight
             sprites.Clear(); renderers.Clear(); parts.Clear(); built = false;
             rig=null;floorMask=null;groundShadow=null;
             body=null;nearPaw=null;farPaw=null;roots=null;jaw=null;mouth=null;
-            flash=death=horizontalSpeed=0f;
+            flash=death=horizontalSpeed=0f;rootDeflectUntil=0;
             lastRootX=transform.position.x;
             lastPosePattern="";lastPoseStage="idle";lastPoseProgress=0f;lastFacing=-1f;
             introApplied=false;mainVisible=true;turning=false;turnProgress=0;turnFrom=turnTo=-1;

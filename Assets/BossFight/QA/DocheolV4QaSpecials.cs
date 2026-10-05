@@ -49,7 +49,8 @@ namespace FourGuardians.BossFight
                 // The timed rock route already includes the committed sweep and its jump.
                 // An independent early sweep jump can land inside a later rock's impact.
                 else if(boss.Pattern==BossPattern.DT02Sweep && !boss.RockfallActive && boss.State==BossState.Telegraph && boss.LockedTellDuration*(1-boss.StateProgress)<=.22f)jump=true;
-                else if(boss.Pattern==BossPattern.WholeBodyBite)move=WalkOut(boss.WarningBounds);
+                else if(boss.Pattern==BossPattern.WholeBodyBite)
+                {Bounds both=boss.WarningBounds;both.Encapsulate(boss.SecondaryWarningBounds);move=WalkOut(both);}
                 else if(boss.Pattern==BossPattern.BBurrowLeap)
                 {
                     if(boss.AttackStage=="submerge" || boss.AttackStage=="travel" || boss.AttackStage=="rise" || boss.AttackStage=="flight")move=WalkOut(boss.WarningBounds);
@@ -134,44 +135,7 @@ namespace FourGuardians.BossFight
             if(Mathf.Abs(bx)>5)Record(label+"_opens_wall_space",Mathf.Abs(target)<Mathf.Abs(bx)-1,"wall target="+target);
             yield return Snapshot(label+"-result");
         }
-        private IEnumerator WholeMatrix()
-        {
-            yield return PhaseSeed(0,-2.4f);yield return Whole(false,0,-2.4f);
-            boss.SetFightActive(false);boss.transform.position=Vector3.zero;player.ResetForFight(new Vector2(-2.4f,boss.FloorY+.025f));player.SetExternalInput(true);boss.SetFightActive(true);
-            yield return Whole(true,0,-2.4f);
-        }
-        private IEnumerator Whole(bool greedy,float bx,float px)
-        {
-            string label=greedy?"whole-greed":"whole-safe";int incoming=damageEvents;
-            Record(label+"_starts",boss.ForcePattern(BossPattern.WholeBodyBite),"controlled phase2 initial special");
-            int initialFacing=boss.Facing,firstId=boss.AttackId,lastId=firstId;float firstX=boss.WarningBounds.center.x,secondX=boss.SecondaryWarningBounds.center.x;
-            float end=Time.time+7f,recoverEnd=0,recoverX=0;int recoverHp=0,damage=0;bool recovered=false,done=false,stable=true;HashSet<int> contacts=new HashSet<int>();
-            while(Time.time<end && !player.IsDead)
-            {
-                if(greedy)player.SubmitInput(0,false,boss.State!=BossState.Recovery,false);else Evasion();
-                if(boss.State==BossState.Telegraph || boss.State==BossState.Active)
-                {
-                    stable&=boss.Facing==initialFacing;
-                    stable&=Mathf.Abs(boss.TargetX-(boss.AttackId==firstId?firstX:secondX))<.001f;
-                    if(boss.AttackStage=="whole_hit")contacts.Add(boss.AttackId);
-                    Capture(label+"-"+boss.AttackStage+"-"+boss.WholeSwingSide);
-                    if(boss.AttackStage=="whole_cross" && boss.AttackStageProgress>.46f && boss.AttackStageProgress<.54f)Capture(label+"-whole-cross-mid");
-                }
-                if(boss.State==BossState.Recovery)
-                {
-                    if(!recovered){recovered=true;recoverEnd=Time.time+boss.RecoveryRemaining;recoverX=boss.transform.position.x;recoverHp=boss.Health.CurrentHealth;Record(label+"_long_recovery",boss.RecoveryRemaining>=1.65f,"remaining="+boss.RecoveryRemaining);}
-                    stable&=Mathf.Abs(boss.transform.position.x-recoverX)<.001f;
-                    if(!greedy)player.SubmitInput(Mathf.Sign(boss.transform.position.x-player.Body.position.x)*.02f,false,true,false);
-                    damage=Mathf.Max(damage,recoverHp-boss.Health.CurrentHealth);Capture(label+"-recovery");
-                    if(Time.time>=recoverEnd-Time.fixedDeltaTime){done=true;break;}
-                }
-                yield return null;
-            }
-            Record(label+"_two_committed_contacts",contacts.Count==2&&stable&&done,"contactIDs="+contacts.Count+" lockedTargets="+stable);
-            Record(label+"_evasion_risk",greedy?damageEvents>incoming:damageEvents==incoming,"incoming="+(damageEvents-incoming));
-            if(!greedy)Record(label+"_long_punish",damage>=2,"ordinary recovery damage="+damage);
-            yield return Snapshot(label+"-result");
-        }
+        private IEnumerator WholeMatrix(){yield return V5WholeMatrix();}
         private IEnumerator PhaseEvents()
         {
             yield return Entry(-8.5f,0);
