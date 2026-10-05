@@ -53,7 +53,15 @@ namespace FourGuardians.BossFight
                 {Bounds both=boss.WarningBounds;both.Encapsulate(boss.SecondaryWarningBounds);move=WalkOut(both);}
                 else if(boss.Pattern==BossPattern.BBurrowLeap)
                 {
-                    if(boss.AttackStage=="submerge" || boss.AttackStage=="travel" || boss.AttackStage=="rise" || boss.AttackStage=="flight")move=WalkOut(boss.WarningBounds);
+                    if(boss.BurrowBranch==BurrowVariant.ArcLeap && (boss.State==BossState.Telegraph || boss.AttackStage=="departure" || boss.AttackStage=="flight"))
+                    {
+                        Bounds p=player.HurtBounds;
+                        bool depart=p.min.x<boss.DepartureWarningBounds.max.x&&p.max.x>boss.DepartureWarningBounds.min.x;
+                        bool land=p.min.x<boss.LandingWarningBounds.max.x&&p.max.x>boss.LandingWarningBounds.min.x;
+                        if(depart)move=WalkOut(boss.DepartureWarningBounds);else if(land)move=WalkOut(boss.LandingWarningBounds);
+                    }
+                    else if(boss.BurrowBranch!=BurrowVariant.ArcLeap)
+                    {Bounds warning=boss.WarningBounds;if(boss.SecondaryWarningBounds.size.x>0)warning.Encapsulate(boss.SecondaryWarningBounds);move=WalkOut(warning);}
                     else if(boss.AttackStage=="wave_delay" || boss.AttackStage=="wave")
                     {
                         float span=Mathf.Max(boss.TargetX-boss.ArenaLeft,boss.ArenaRight-boss.TargetX);
@@ -223,7 +231,7 @@ namespace FourGuardians.BossFight
             do{session=FindFirstObjectByType<BossFightSession>();player=FindFirstObjectByType<BossFightPlayerAdapter>();boss=FindFirstObjectByType<DoCheolBossController>();yield return null;}
             while((session==null||player==null||boss==null||session.State!=EncounterState.Fighting)&&Time.realtimeSinceStartup<deadline);
             if(player!=null){player.Damaged+=OnDamaged;player.SetExternalInput(true);}
-            Record("retry_resets_encounter",player!=null&&boss!=null&&player.Health.CurrentHealth==8&&boss.Health.CurrentHealth==40&&boss.ArmorMask==15&&boss.Phase==1&&boss.RockfallEventCount==0,"fresh shared HP and no stale rocks");
+            Record("retry_resets_encounter",player!=null&&boss!=null&&player.Health.CurrentHealth==5&&boss.Health.CurrentHealth==40&&boss.ArmorMask==15&&boss.Phase==1&&boss.RockfallEventCount==0,"fresh shared HP and no stale rocks");
             yield return Snapshot("retry-ready");
         }
     }

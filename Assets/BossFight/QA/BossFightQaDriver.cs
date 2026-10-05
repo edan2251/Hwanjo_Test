@@ -95,7 +95,7 @@ namespace FourGuardians.BossFight
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Install()
         {
-            if (!Requested || (RequestedMode.StartsWith("v4", StringComparison.OrdinalIgnoreCase) || RequestedMode.StartsWith("v5", StringComparison.OrdinalIgnoreCase)) || FindFirstObjectByType<BossFightQaDriver>() != null) return;
+            if (!Requested || (RequestedMode.StartsWith("v4", StringComparison.OrdinalIgnoreCase) || RequestedMode.StartsWith("v5", StringComparison.OrdinalIgnoreCase) || RequestedMode.StartsWith("v6", StringComparison.OrdinalIgnoreCase)) || FindFirstObjectByType<BossFightQaDriver>() != null) return;
             DontDestroyOnLoad(new GameObject("BossFight Automated QA").AddComponent<BossFightQaDriver>().gameObject);
         }
         private IEnumerator Start()
@@ -722,7 +722,7 @@ namespace FourGuardians.BossFight
             player.SetExternalInput(true);
             yield return Drive(0.25f);
             Record(prefix + "_retry_clears_v3_hazards", boss != null && !boss.RockfallActive && boss.Rockfalls.Count == 0 && boss.ComboIndex == 0, "hazards=" + (boss != null ? boss.Rockfalls.Count : -1));
-            Record(prefix + "_retry_health", !player.IsDead && player.Health.CurrentHealth == 8 && boss != null && boss.Health.CurrentHealth == 40,
+            Record(prefix + "_retry_health", !player.IsDead && player.Health.CurrentHealth == 5 && boss != null && boss.Health.CurrentHealth == 40,
                 "playerHP=" + player.Health.CurrentHealth + " bossHP=" + (boss != null ? boss.Health.CurrentHealth : -1));
             Record(prefix + "_retry_state", encounter != null && encounter.State == EncounterState.Fighting && Mathf.Approximately(Time.timeScale, 1) && boss != null && boss.Pattern == BossPattern.None && boss.AttackId == 0 && boss.State == BossState.Idle && player.FightActive && boss.FightActive,
                 "session=" + (encounter != null ? encounter.State.ToString() : "missing") + " timescale=" + Time.timeScale + " boss=" + (boss != null ? boss.State + "/" + boss.Pattern + " id=" + boss.AttackId : "missing"));
@@ -984,6 +984,7 @@ namespace FourGuardians.BossFight
         {
             report.inputStrategy = "presentation-only snapshot; visual overrides, no combat/HP progression measurement";
             DocheolVisual visual = FindFirstObjectByType<DocheolVisual>();
+            if(visual!=null&&visual.WholeWhiteFlashEnabled)report.specVersion="whole-white-armor-capture-v6";
             BossFightSession session = FindSession() as BossFightSession;
             BossFightHud hud = FindFirstObjectByType<BossFightHud>();
             if (visual == null || !visual.HasV2Artwork || boss == null || session == null)
@@ -1015,7 +1016,8 @@ namespace FourGuardians.BossFight
                 visual.OnLocalHit(forehead.bounds.center, 0, true);
                 visual.OnLocalHit(dorsal.bounds.center, 3, true);
                 visual.SetPose("", "idle", 0, -1);
-                Record("local_hits_same_frame", forehead.color.g < .95f && dorsal.color.g < .95f && shoulder.color == Color.white,
+                bool whiteFlash=visual.WholeWhiteFlashEnabled;
+                Record("local_hits_same_frame", whiteFlash?visual.WholeFlashAmount==1f:forehead.color.g < .95f && dorsal.color.g < .95f && shoulder.color == Color.white,
                     "foreheadG=" + forehead.color.g + " dorsalG=" + dorsal.color.g + " untouchedShoulder=" + shoulder.color);
                 Record("armored_hits_do_not_tint_skin", VisualPart(visual, "BodyFront").color == Color.white,
                     "global flash=1 with armored local hit; underlying skin remains white");
@@ -1101,17 +1103,18 @@ namespace FourGuardians.BossFight
                 bool untouchedArmorWhite = true;
                 for (int i = 1; i < armorNames.Length; i++)
                     untouchedArmorWhite &= VisualPart(visual, armorNames[i]).enabled && VisualPart(visual, armorNames[i]).color == Color.white;
-                Record("exposed_skin_hit_keeps_remaining_armor_white", skin.color.g < .95f && untouchedArmorWhite,
+                Record("exposed_skin_hit_keeps_remaining_armor_white", (whiteFlash?visual.WholeFlashAmount==1f:skin.color.g < .95f) && untouchedArmorWhite,
                     "global flash=1; exposed skinG=" + skin.color.g + " three untouched plates white=" + untouchedArmorWhite);
                 presentationCaptureLabel = "exposed skin hit; three untouched armor plates";
                 yield return CaptureVisualFrame("local-hit-exposed-skin");
                 visual.SetCombatState(2, 0, "idle", 0, 0, false, false);
                 visual.SetPose("", "idle", 0, -1);
                 visual.OnLocalHit(skin.bounds.center, 0, false);
-                Record("unarmored_hit_material", skin.color.g < .95f && !VisualPart(visual, "ForeheadArmor").enabled,
+                Record("unarmored_hit_material", (whiteFlash?visual.WholeFlashAmount==1f:skin.color.g < .95f) && !VisualPart(visual, "ForeheadArmor").enabled,
                     "skinG=" + skin.color.g + " forehead plate remains hidden");
                 presentationCaptureLabel = "unarmored local hit";
                 yield return CaptureVisualFrame("local-hit-unarmored");
+                if(whiteFlash)visual.SetFlash(0); // Session is disabled in this fixture; explicit restoration is required.
                 // Resume only the visual clock, while session/controller/input remain disabled.
                 Time.timeScale = 1;
                 yield return new WaitForSeconds(.20f);

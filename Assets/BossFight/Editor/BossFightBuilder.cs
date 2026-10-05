@@ -14,7 +14,7 @@ namespace FourGuardians.BossFight.Editor
 {
     public static class BossFightBuilder
     {
-        public const string ScenePath = "Assets/BossFight/Scenes/DocheolArenaV5.unity";
+        public const string ScenePath = "Assets/BossFight/Scenes/DocheolArenaV6.unity";
         private const string Generated = "Assets/BossFight/Generated";
         private static string WorkRoot => Path.GetFullPath(Path.Combine(Application.dataPath,"..",".."));
 
@@ -109,6 +109,7 @@ namespace FourGuardians.BossFight.Editor
                 var r = part.topLeftRect;
                 return new Rect(r.x, r.y, r.width, r.height);
             }).ToArray();
+            visual.ConfigureWhiteFlashShader(AssetDatabase.LoadAssetAtPath<Shader>("Assets/BossFight/Presentation/DocheolWhiteFlash.shader"));
             visual.ConfigureV2(core, supports, armor);
             // The visual API accepts top-left pixels and performs the Unity bottom-left conversion once.
             visual.ConfigureV2Regions(regions);
@@ -120,7 +121,7 @@ namespace FourGuardians.BossFight.Editor
             EditorBuildSettings.scenes=new[]{new EditorBuildSettingsScene(ScenePath,true)};
             EditorSceneManager.playModeStartScene=AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath);
             PlayerSettings.companyName="Hwanjo";
-            PlayerSettings.productName="Hwanjo - Docheol V5 / Root and Rhythm";
+            PlayerSettings.productName="Hwanjo - Docheol V6 / Burrow and Impact";
             PlayerSettings.defaultScreenWidth=1280;
             PlayerSettings.defaultScreenHeight=720;
             PlayerSettings.fullScreenMode=FullScreenMode.Windowed;
@@ -193,13 +194,13 @@ namespace FourGuardians.BossFight.Editor
             try
             {
                 BuildScene();
-                string destination=Path.Combine(WorkRoot,"Deliverables","Hwanjo_Docheol_V5","Hwanjo_Docheol_V5.exe");
+                string destination=Path.Combine(WorkRoot,"Deliverables","Hwanjo_Docheol_V6","Hwanjo_Docheol_V6.exe");
                 Directory.CreateDirectory(Path.GetDirectoryName(destination));
                 var options=new BuildPlayerOptions{ scenes=new[]{ScenePath},locationPathName=destination,
                     target=BuildTarget.StandaloneWindows64,options=BuildOptions.None };
                 BuildReport report=BuildPipeline.BuildPlayer(options);
-                Directory.CreateDirectory(Path.Combine(WorkRoot,"QA","V5"));
-                File.WriteAllText(Path.Combine(WorkRoot,"QA","V5","build-summary.json"),
+                Directory.CreateDirectory(Path.Combine(WorkRoot,"QA","V6"));
+                File.WriteAllText(Path.Combine(WorkRoot,"QA","V6","build-summary.json"),
                     JsonUtility.ToJson(new BuildEvidence { result=report.summary.result.ToString(), errors=report.summary.totalErrors,
                     warnings=report.summary.totalWarnings,bytes=report.summary.totalSize,path=destination,
                     unity=Application.unityVersion,utc=DateTime.UtcNow.ToString("o") },true));

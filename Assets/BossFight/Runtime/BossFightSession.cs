@@ -35,6 +35,12 @@ namespace FourGuardians.BossFight
         public float StateTime => stateTime;
         public int Attempts => attempts;
         public bool Muted => feedback != null && feedback.Muted;
+        public float FlashScale=>feedback!=null?feedback.FlashScale:1;
+        public float HitStopRemaining=>Mathf.Max(0,hitStopUntil-Time.unscaledTime);
+        public float HitStopBudgetSpent=>stopBudgetSpent;
+        public float MaximumHitStopRequested {get;private set;}
+        public int HitStopRequests {get;private set;}
+        private float stopBudgetSpent,stopBudgetWindow;
         public float CameraShake => feedback != null ? feedback.ShakeScale : 0f;
         public string LastCue => lastCue;
         public float CueAge => Time.unscaledTime - cueTime;
@@ -64,7 +70,7 @@ namespace FourGuardians.BossFight
                 if (args[i] == "-bossqa" && i + 1 < args.Length)
                 {
                     IsQaContracts = args[i + 1] == "contracts" || args[i + 1] == "v3contracts";
-                    qaIntro = args[i + 1] == "intro" || args[i + 1] == "v3intro" || args[i + 1] == "observe" || args[i + 1] == "v4observe" || args[i + 1] == "v5observe";
+                    qaIntro = args[i + 1] == "intro" || args[i + 1] == "v3intro" || args[i + 1] == "observe" || args[i + 1] == "v4observe" || args[i + 1] == "v5observe" || args[i + 1] == "v6observe";
                 }
                 if (args[i] == "-bossqa-fps" && i + 1 < args.Length && int.TryParse(args[i + 1], out int fps))
                     Application.targetFrameRate = Mathf.Clamp(fps, 15, 240);
@@ -74,7 +80,7 @@ namespace FourGuardians.BossFight
         private void Start()
         {
             if (player == null || boss == null) { Debug.LogError("Boss encounter references are missing."); return; }
-            player.Configure(8, .8f);
+            player.Configure(5, .8f);
             bossHealth = boss.GetComponent<Health2D>();
             bossHealth.Configure(40, CombatTeam.Enemy);
             bossHealth.ResetHealth();
@@ -155,6 +161,7 @@ namespace FourGuardians.BossFight
             {
                 if (keyboard.mKey.wasPressedThisFrame) ToggleMute();
                 if (keyboard.f6Key.wasPressedThisFrame) CycleCameraShake();
+                if(keyboard.f7Key.wasPressedThisFrame)CycleFlashScale();
                 if (keyboard.f11Key.wasPressedThisFrame)
                     Screen.fullScreenMode = Screen.fullScreen ? FullScreenMode.Windowed : FullScreenMode.FullScreenWindow;
                 if (keyboard.escapeKey.wasPressedThisFrame) TogglePause();
@@ -202,7 +209,7 @@ namespace FourGuardians.BossFight
                         bossVisual.SetIntro(IntroStage, IntroStageProgress);
                 }
                 bossFlash = Mathf.MoveTowards(bossFlash, 0f, Time.unscaledDeltaTime * 9f);
-                bossVisual.SetFlash(bossFlash);
+                bossVisual.SetFlash(bossFlash*FlashScale);
             }
             if (State == EncounterState.Fighting && boss.Pattern == BossPattern.BBurrowLeap)
                 arenaEffects?.SetBurrow(boss.AttackStage, boss.transform.position, boss.AttackStageProgress);
@@ -244,22 +251,31 @@ namespace FourGuardians.BossFight
         {
             bossVisual?.OnLocalHit(point, region, hasArmor);
             feedback?.BossHit(point, hasArmor);
-            HitStop(hasArmor ? .018f : .025f);
+            HitStop(hasArmor ? .028f : .038f);
         }
         private void OnPlayerDamaged(DamageInfo damage)
         {
-            feedback?.PlayerHit(damage.HitPoint);
-            HitStop(.050f);
+            feedback?.PlayerHit(damage.HitPoint,damage.Knockback);
+            HitStop(boss.Pattern==BossPattern.WholeBodyBite && boss.WholeContactIndex<4?.030f:.045f);
         }
         private void OnBossDamaged(DamageInfo damage)
         {
-            bossFlash = .45f;
+            bossFlash = 1f;
         }
         private void HitStop(float duration)
         {
             if (State != EncounterState.Fighting || boss.State == BossState.Transition) return;
-            hitStopUntil = Mathf.Max(hitStopUntil, Time.unscaledTime + duration);
-            Time.timeScale = .12f;
+            float now=Time.unscaledTime;
+            if(now-stopBudgetWindow>=1){stopBudgetWindow=now;stopBudgetSpent=0;}
+            duration=Mathf.Min(.055f,duration);
+            float remaining=Mathf.Max(0,hitStopUntil-now);
+            float extra=Mathf.Max(0,duration-remaining);
+            extra=Mathf.Min(extra,Mathf.Max(0,.16f-stopBudgetSpent));
+            if(extra<=0)return;
+            stopBudgetSpent+=extra;HitStopRequests++;
+            hitStopUntil=now+remaining+extra;MaximumHitStopRequested=Mathf.Max(MaximumHitStopRequested,remaining+extra);
+            // Physics, AI, action timers, knockback and immunity all use scaled combat time.
+            Time.timeScale=0f;
         }
         private void OnPlayerDied()
         {
@@ -308,6 +324,11 @@ namespace FourGuardians.BossFight
             if (feedback == null) return;
             float value = feedback.ShakeScale;
             feedback.ShakeScale = value < .01f ? .35f : value < .5f ? .65f : value < .9f ? 1f : 0f;
+        }
+        public void CycleFlashScale()
+        {
+            if(feedback==null)return;
+            float value=feedback.FlashScale;feedback.FlashScale=value<.01f?.35f:value<.5f?.65f:value<.9f?1:0;
         }
         public void Retry()
         {

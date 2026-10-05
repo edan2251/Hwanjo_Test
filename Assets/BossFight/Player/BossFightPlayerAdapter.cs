@@ -61,7 +61,7 @@ namespace FourGuardians.BossFight
             SetFightActive(false);
         }
 
-        public void Configure(int health = 8, float hitInvulnerability = 0.8f)
+        public void Configure(int health = 5, float hitInvulnerability = 0.8f)
         {
             CacheComponents();
             Movement.ConfigureBossCombat();

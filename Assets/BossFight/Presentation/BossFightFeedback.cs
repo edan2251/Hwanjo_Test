@@ -29,6 +29,14 @@ namespace FourGuardians.BossFight
         private static float sessionShakeScale = 0.65f;
         // Retry reloads the scene, but must preserve the user's in-session audio choice.
         private static bool sessionMuted;
+        private static float sessionFlashScale=1;
+        private Vector2 directionalKick;
+        public float FlashScale {get=>sessionFlashScale;set=>sessionFlashScale=float.IsNaN(value)?1:Mathf.Clamp01(value);}
+        public float CurrentCameraOffset=>fightCamera!=null?Vector3.Distance(fightCamera.transform.position,CameraRest):0;
+        public float ShakeTimeRemaining=>shakeRemaining;
+        public int BossHitCount {get;private set;}
+        public int PlayerHitCount {get;private set;}
+        public Vector2 LastImpactDirection {get;private set;}
         private bool muted;
         private bool configured;
 
@@ -177,6 +185,8 @@ namespace FourGuardians.BossFight
                     Play("roar", position, 0.78f);
                     Shake(0.15f, 0.20f);
                     break;
+                case "departure":Play("impact",position,.62f);Shake(.065f,.11f);Burst(position,6,new Color(.48f,.42f,.29f),.65f);break;
+                case "burrow_warning":Play("rumble",position,.35f);break;
                 case "flight": Play("sweep", position, 0.58f); break;
                 case "wave_delay": Play("lock", position, 0.42f); break;
                 case "wave":
@@ -230,7 +240,7 @@ namespace FourGuardians.BossFight
                     Shake(0.065f * amount, 0.16f);
                     break;
                 case "whole_bite":
-                    Play("bite",position,.82f);Play("wood",position,.40f);Shake(.09f*amount,.12f);Burst(position,7,new Color(.54f,.44f,.28f),.55f);break;
+                    Play("bite",position,.62f*amount);Play("impact",position,.36f*amount);Shake(.080f*amount,.11f);Burst(position,4,new Color(.54f,.44f,.28f),.45f*amount);break;
                 case "whole_shift":Play("wood",position,.35f);break;
                 case "phase_roar":Play("roar",position,.80f);break;
                 case "root_block":
@@ -250,11 +260,13 @@ namespace FourGuardians.BossFight
             }
         }
 
-        public void PlayerHit(Vector2 position)
+        public void PlayerHit(Vector2 position)=>PlayerHit(position,Vector2.zero);
+        public void PlayerHit(Vector2 position,Vector2 direction)
         {
             if (!configured) return;
+            PlayerHitCount++;LastImpactDirection=direction.normalized;
             Play("hurt", position, 0.90f);
-            Shake(0.09f, 0.18f);
+            Shake(.09f,.16f);directionalKick=LastImpactDirection*.045f;
             Burst(position, 7, new Color(0.87f, 0.43f, 0.31f), 0.65f);
         }
 
@@ -263,7 +275,8 @@ namespace FourGuardians.BossFight
         public void BossHit(Vector2 position, bool armored)
         {
             if (!configured) return;
-            // Ordinary hits are local: no camera shake, no whole-screen flash.
+            BossHitCount++;
+            Shake(.035f,.085f);directionalKick=new Vector2(position.x<0?1:-1,0)*.015f;
             Play(armored ? "wood" : "skin", position, armored ? 0.66f : 0.60f);
             Burst(position, armored ? 5 : 3,
                 armored ? new Color(0.60f, 0.43f, 0.25f) : new Color(0.84f, 0.78f, 0.62f),
@@ -287,7 +300,7 @@ namespace FourGuardians.BossFight
 
         public void ResetEffects()
         {
-            shakeRemaining = shakeDuration = shakeStrength = introShakeStrength = 0f;
+            shakeRemaining = shakeDuration = shakeStrength = introShakeStrength = 0f;directionalKick=Vector2.zero;
             hazardReadability = false;
             if (fightCamera != null) fightCamera.transform.position = CameraRest;
             for (int i = debris.Count - 1; i >= 0; i--)
@@ -312,6 +325,7 @@ namespace FourGuardians.BossFight
         {
             float remainingEnvelope = shakeDuration > 0f ? shakeRemaining / shakeDuration : 0f;
             float currentStrength = shakeStrength * remainingEnvelope * remainingEnvelope;
+            duration=Mathf.Min(duration,.22f);
             float limit = hazardReadability ? 0.05f : 0.18f;
             // Compare against the decayed impulse so repeated small hits cannot revive a heavy one.
             shakeStrength = Mathf.Max(currentStrength, Mathf.Min(limit, strength));
@@ -329,7 +343,7 @@ namespace FourGuardians.BossFight
             Vector2 offset = new Vector2(Mathf.Sin(phase * 71f), Mathf.Sin(phase * 93f + 1f));
             float strength = shakeStrength * envelope * envelope + introShakeStrength;
             float limit = hazardReadability ? 0.05f : 0.18f;
-            offset = Vector2.ClampMagnitude(offset * strength, limit) * ShakeScale;
+            offset = Vector2.ClampMagnitude(offset * strength+directionalKick*envelope*envelope, limit) * ShakeScale;
             fightCamera.transform.position = CameraRest + new Vector3(offset.x, offset.y, 0f);
             if (shakeRemaining <= 0f) shakeStrength = 0f;
         }
@@ -496,7 +510,7 @@ namespace FourGuardians.BossFight
         {
             if (effects != null) effects.Stop();
             if (atmosphere != null) atmosphere.Stop();
-            shakeRemaining = shakeDuration = shakeStrength = introShakeStrength = 0f;
+            shakeRemaining = shakeDuration = shakeStrength = introShakeStrength = 0f;directionalKick=Vector2.zero;
             hazardReadability = false;
             if (fightCamera != null) fightCamera.transform.position = CameraRest;
         }

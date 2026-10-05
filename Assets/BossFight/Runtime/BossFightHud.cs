@@ -61,6 +61,7 @@ namespace FourGuardians.BossFight
             GUI.Label(new Rect(1010,22,230,23),$"\uc2dc\ub3c4 {session.Attempts:00}  \u00b7  {Mathf.FloorToInt(session.Elapsed/60):00}:{Mathf.FloorToInt(session.Elapsed%60):00}",small);
             GUI.Label(new Rect(1010,47,230,23),session.Muted?"M \uc18c\ub9ac \uaebc\uc9d0   F11 \ud654\uba74":"M \uc18c\ub9ac \ucf1c\uc9d0   F11 \ud654\uba74",small);
             GUI.Label(new Rect(1010,72,230,23),$"F6 화면 진동 {Mathf.RoundToInt(session.CameraShake*100f)}%",small);
+            GUI.Label(new Rect(1010,94,230,20),$"F7 피격 플래시 {Mathf.RoundToInt(session.FlashScale*100)}%",small);
             var boss=session.Boss;
             if(boss!=null&&boss.Health!=null)
             {
@@ -92,6 +93,7 @@ namespace FourGuardians.BossFight
         }
         private void DrawPatternHint()
         {
+            GUI.Label(new Rect(1010,94,230,20),$"F7 피격 플래시 {Mathf.RoundToInt(session.FlashScale*100)}%",small);
             var boss=session.Boss;if(boss==null)return;
             if(boss.RockfallActive)GUI.Label(new Rect(365,120,550,26),"낙석 중 · 앞발과 바닥의 그림자를 함께 살피세요",smallCenter);
             string text="";Color accent=new Color(.95f,.65f,.29f);
@@ -103,7 +105,7 @@ namespace FourGuardians.BossFight
                 text=boss.Pattern switch {
                     BossPattern.DT02Sweep=>"앞발 휘두르기 · 점프 또는 범위 밖으로 대시",
                     BossPattern.DT03Bite=>"벌어지는 입 · 물기 범위에서 벗어나세요",
-                    BossPattern.BBurrowLeap=>boss.AttackStage=="wave_delay"||boss.AttackStage=="wave"?"착지 뒤 낮은 파동 · 타이밍을 맞춰 넘으세요":"땅속을 따라 움직인다 · 착지 표시를 살피세요",
+                    BossPattern.BBurrowLeap=>boss.AttackStage=="wave_delay"||boss.AttackStage=="wave"?"착지 뒤 낮은 파동 · 타이밍을 맞춰 넘으세요":boss.BurrowBranch==BurrowVariant.QuickSlam?"낮게 나온다 · 한쪽 내려찍기를 피하세요":boss.BurrowBranch==BurrowVariant.FiveBite?"땅밑에서 몸을 젖힌다 · 좌우 다섯 번을 기다리세요":"비스듬히 솟구친다 · 출발과 착지 표시를 살피세요",
                     BossPattern.WholeBodyBite=>boss.AttackStage=="whole_final_windup"?"몸을 다시 젖힌다 · 마지막 왼쪽을 기다리세요":"좌우로 네 번 · 마지막 왼쪽까지 피하세요",
                     BossPattern.ARockfall=>"다시 울부짖는다 · 낙석을 준비하세요",_=>""};
             else if(boss.State==BossState.ActionWait){text="거대한 몸이 자리를 잡는다 · 다음 움직임을 살핀다";accent=Color.gray;}
@@ -132,7 +134,8 @@ namespace FourGuardians.BossFight
             if(Button(new Rect(460,333,360,49),"\uacc4\uc18d\ud558\uae30    ESC",ink))session.TogglePause();
             if(Button(new Rect(460,397,360,49),"\ucc98\uc74c\ubd80\ud130    R",muted))session.Retry();
             if(Button(new Rect(460,461,360,44),$"화면 진동 {Mathf.RoundToInt(session.CameraShake*100f)}%    F6",muted))session.CycleCameraShake();
-            if(TextButton(new Rect(520,528,240,35),"\uc885\ub8cc"))session.Quit();
+            if(Button(new Rect(460,510,360,40),$"피격 플래시 {Mathf.RoundToInt(session.FlashScale*100)}%    F7",muted))session.CycleFlashScale();
+            if(TextButton(new Rect(520,560,240,35),"\uc885\ub8cc"))session.Quit();
         }
         private void DrawResult()
         {

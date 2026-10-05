@@ -72,6 +72,11 @@ namespace FourGuardians.BossFight
         private readonly Dictionary<Texture2D, Material> textureMaterials = new Dictionary<Texture2D, Material>();
         private SpriteRenderer groundShadow;
         private readonly List<Texture2D> runtimeTextures = new List<Texture2D>();
+        [SerializeField] private Shader whiteFlashShader;
+        public float WholeFlashAmount=>flash;
+        public bool WholeWhiteFlashEnabled=>whiteFlashShader!=null;
+        public void ConfigureWhiteFlashShader(Shader shader){whiteFlashShader=shader;}
+        private MaterialPropertyBlock flashBinding;
         private float flash, death, groundY;
         private bool built;
         // Authoritative presentation inputs; visuals are integrated after reference review.
@@ -218,7 +223,7 @@ namespace FourGuardians.BossFight
         {
             if (!textureMaterials.TryGetValue(texture, out Material material))
             {
-                Shader shader=Shader.Find("Sprites/Default");
+                Shader shader=whiteFlashShader!=null?whiteFlashShader:Shader.Find("Sprites/Default");
                 if(shader==null)return;
                 material=new Material(shader) { name="Docheol_"+texture.name+"_Material" };
                 material.mainTexture=texture;
@@ -275,7 +280,7 @@ namespace FourGuardians.BossFight
             if (state == "dead") death = Mathf.Max(death,p);
             if (HasV2Artwork) ApplyV2CombatPose(move, state);
             if(turning && HasV2Artwork) ApplyTurnPose();
-            else if(move=="WHOLEBODYBITE" && HasV2Artwork)ApplyWholeBodyPose(state);
+            else if(HasV2Artwork && (move=="WHOLEBODYBITE" || presentationAttackStage.StartsWith("quick_slam") || presentationAttackStage=="quick_tell" || presentationAttackStage=="burrow_five_tell"))ApplyWholeBodyPose(state);
             else AlignAttackLimbs(move, state);
             if(roots!=null && Time.time<rootDeflectUntil)Shift(roots,Mathf.Sin((rootDeflectUntil-Time.time)*100f)*.025f,0);
             ApplyDeath();
@@ -302,11 +307,14 @@ namespace FourGuardians.BossFight
         private void ApplyWholeBodyPose(string state)
         {
             string step=presentationAttackStage;float p=presentationAttackProgress;
+            if(step=="quick_tell" || step=="burrow_five_tell")step="whole_tell";
+            else if(step=="quick_slam_arc")step="whole_arc";
+            else if(step=="quick_slam_hit")step="whole_hit";
             float sign=-wholeSide,angle=wholeSide*30f,lift=0;
             if(step=="whole_tell")
             {
                 angle=wholeFirst*30f*Ease(p);
-                if(lastFacing>0)
+                if(wholeFirst<0 && lastFacing>0)
                 {
                     // A world-left first strike still earns a visible committed preparation
                     // when the previous pose faces right. No instant full-body mirror.
@@ -372,14 +380,15 @@ namespace FourGuardians.BossFight
             }
             else if (move.StartsWith("DT03"))
             {
-                float gape = tension*(1f-impact);
-                // Expand the throat, then snap the jaw upward without lifting the boss off the floor.
-                Shift(body,-.22f*impact*tension+.10f*gape,.11f*gape);
-                Shift(jaw,-.08f*gape,.28f*impact*tension);
-                Rotate(jaw,13f*gape-9f*impact*tension);
-                Scale(jaw,1f,1f-.12f*impact*tension);
-                Scale(mouth,1f+.11f*gape,1f+.15f*gape-.40f*impact*tension);
-                Rotate(nearPaw,-4f*gape); Shift(farPaw,-.12f*impact*tension,0f);
+                // Horizontal recoil -> accelerated front extension -> jaw snap -> withdrawal.
+                // The head advances through its locked mouth volume, without a vertical slam.
+                float ready=tell?Ease(p):0;
+                float snap=strike?Ease(Mathf.Clamp01(p/.32f)):recover?1-Ease(p):0;
+                Shift(body,.14f*ready-.46f*snap,-.018f*snap);Rotate(body,1.6f*snap);
+                Scale(body,1+.045f*snap,1-.015f*snap);
+                Shift(jaw,-.08f*ready-.12f*snap,.31f*snap);Rotate(jaw,13f*ready-11f*snap);
+                Scale(jaw,1,1-.14f*snap);Scale(mouth,1+.10f*ready,1+.12f*ready-.58f*snap);
+                Rotate(nearPaw,-4f*ready);Shift(farPaw,-.16f*snap,0);Scale(roots,1+.04f*snap,1);
             }
             else if (move == "AROCKFALL")
             {
@@ -408,19 +417,18 @@ namespace FourGuardians.BossFight
                     Shift(farPaw,-.24f*dig,.08f*dig); Rotate(farPaw,16f*dig);
                     Scale(roots,1f-.16f*dig,1f-.25f*dig);
                 }
-                else if (step == "rise" || step == "flight")
+                else if (step == "rise" || step == "departure" || step == "flight")
                 {
                     float height=Mathf.Max(0f,transform.position.y-groundY);
                     float tuck=Mathf.Clamp01(height/1.2f);
                     Shift(nearPaw,.18f*tuck,.63f*tuck); Rotate(nearPaw,-35f*tuck);
                     Shift(farPaw,.14f*tuck,.51f*tuck); Rotate(farPaw,-27f*tuck);
                     Scale(roots,1f-.17f*tuck,1f-.15f*tuck);
-                    OpenMouth(.35f*tuck);
+                    OpenMouth(.35f*tuck);Rotate(body,-12f*(1-2*p));
                     if (airborneRoot != null)
                     {
-                        airborneRootVisible=height>.035f;
-                        // Extend the reused sprite past its transparent bottom padding; the floor mask clips the excess.
-                        Scale(airborneRoot,1f,(2.38f+height)/2.16f);
+                        // The new forward arc is an airborne body, not a vertical pillar tethered to the floor.
+                        airborneRootVisible=false;
                     }
                 }
                 else if (step == "land" || step == "wave_delay" || step == "wave" || recover)
@@ -783,14 +791,16 @@ namespace FourGuardians.BossFight
         }
         private void ApplyColors()
         {
+            // Native Unity objects must be created on the main thread, never during serialization.
+            if(flashBinding==null)flashBinding=new MaterialPropertyBlock();
             Color color = Color.Lerp(Color.white,new Color(.35f,.31f,.27f,1f),death*.72f);
-            // Articulated artwork uses the actual local hit/material, including exposed skin.
-            // The session's legacy whole-body flash must not tint untouched armor.
+            // White flash is a per-renderer shader value on attached rig renderers only.
+            // Detached plates, the shadow, background and player never receive it.
             if (!HasV2Artwork) color = Color.Lerp(color,new Color(1f,.57f,.42f,1f),flash*.82f);
             foreach (SpriteRenderer renderer in renderers)
             {
                 Color partColor=color;
-                if(regionByRenderer.TryGetValue(renderer,out int region))
+                if(whiteFlashShader==null && regionByRenderer.TryGetValue(renderer,out int region))
                 {
                     bool armored=armorByRenderer.ContainsKey(renderer);
                     float amount=localHitFlash[region];
@@ -802,6 +812,11 @@ namespace FourGuardians.BossFight
                     partColor=Color.Lerp(partColor,armored?new Color(1f,.77f,.32f,1f):new Color(1f,.48f,.38f,1f),amount*.85f);
                 }
                 renderer.color=partColor;
+                if(whiteFlashShader!=null)
+                {
+                    renderer.GetPropertyBlock(flashBinding);flashBinding.SetFloat("_WhiteFlash",flash);
+                    renderer.SetPropertyBlock(flashBinding);
+                }
             }
         }
         private static float Ease(float value) { return Mathf.SmoothStep(0f,1f,value); }
