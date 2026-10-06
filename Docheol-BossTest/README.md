@@ -7,7 +7,7 @@
 | `BossTest_Unity/` | Unity Hub에서 여는 작업 프로젝트. `Assets`, `Packages`, `ProjectSettings`와 `.meta` 파일이 포함됩니다. |
 | `Reference/` | 도철 이미지 참고자료와 Blender 원본 1개. |
 | `Planning/V6/` | V6 기획표, 흐름도, 이미지. |
-| `QA/` | 최종 보고서와 V6 확인 문서. 이전 빌드와 대량 캡처는 포함하지 않습니다. |
+| `QA/` | 초기 실험의 `FinalReport.md`와 V6 확인 문서. 이전 빌드와 대량 캡처는 포함하지 않습니다. |
 
 ## 노트북에서 작업하기
 
@@ -17,6 +17,8 @@
 4. 변경사항은 이 저장소의 `Docheol-BossTest` 아래에서 관리합니다. 생성된 `Library`, `Temp`, `Logs`, `UserSettings`, 빌드 파일은 올리지 않습니다.
 
 실행만 할 때는 [도철 V6 b05 릴리스](https://github.com/edan2251/Hwanjo_Test/releases/tag/docheol-v6-b05)의 Windows ZIP을 받아 **폴더 전체를 압축 해제**한 뒤 `Hwanjo_Docheol_V6.exe`를 실행합니다. 이 빌드는 원본 Unity 커밋 `24bad62320e13f5dba2afd58e49c4c53f0957793`에서 만들어졌습니다.
+
+릴리스 페이지의 자동 생성 `Source code` ZIP은 릴리스 태그를 만들 당시의 초기 저장소 내용입니다. **Unity 편집용 파일은 `main`을 복제**해서 받으세요.
 
 ## 원본과 외부 자료
 
